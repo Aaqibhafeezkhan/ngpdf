@@ -1,0 +1,146 @@
+# AGENTS.md
+
+ngpdf renders Angular components to PDF. A document is a normal Angular component whose
+template uses the `pdf-*` elements; a custom `RendererFactory2` turns it into a tree of nodes, and
+a lazily loaded engine lays that tree out with Yoga, breaks it into pages and writes it with
+pdfkit. Package `@ngpdf/core`, npm scope `@ngpdf`, GitHub `ngpdf/ngpdf`, MIT.
+
+The design is `docs/superpowers/specs/2026-10-22-v0.1-design.md`, the plan is
+`docs/superpowers/plans/2026-10-22-ngpdf-v0.1.md`, the structure and its patterns are in
+`docs/ARCHITECTURE.md`, and tests, lint, CI, security and releases are in `docs/ENGINEERING.md`.
+Read the ones your change touches before starting. A change that would
+break a rule below needs a different approach or an explicit decision from the maintainer, not an
+exception.
+
+## Before writing any code
+
+- **Load the Angular skills every time.** Load `angular-developer` before any task that touches
+  Angular code: components, inputs, DI, injectors, pipes, change detection, tests, the CLI. Load
+  `angular-new-app` before creating an app or a workspace.
+- **Use the `angular-cli` MCP.**
+  - Call `list_projects` to find the workspace.
+  - Call `get_best_practices` with its path before writing Angular code.
+  - Call `search_documentation` for any API whose Angular 22 form you are not sure of.
+  - Do not write Angular APIs from memory when the MCP can confirm them.
+- **Write the test first** and watch it fail. A test that passes without the change it covers
+  guards nothing: revert the change and check that it fails.
+- **Run the gate before saying a change is done:** `prettier --check .`, `eslint .`, the typecheck,
+  `npm test -- --coverage` (coverage gates in `docs/ENGINEERING.md`), the bundle budget and, for
+  anything that changes output, `scripts/e2e.mjs`.
+
+## Commands
+
+All toolchains run in Docker. Nothing is installed on the host except nvm.
+
+```sh
+./scripts/dev npm ci
+./scripts/dev npm test                 # Vitest, all specs
+./scripts/dev npm test -- <pattern>    # one area, e.g. paginate
+./scripts/dev npm run build:core       # ng-packagr build of @ngpdf/core
+./scripts/dev npx ng build demo
+./scripts/dev node scripts/bundle-budget.mjs   # eager size of @ngpdf/core in the demo
+node scripts/e2e.mjs [--update]        # demo PDFs in headless Chrome vs e2e/expected/*.txt
+```
+
+`scripts/dev` runs a command in `node:24-bookworm-slim` with the repo at `/w`, uid 1000 and a
+6 GB memory cap. The end-to-end script uses the host's `/usr/bin/google-chrome` and runs
+`pdftotext` in Docker.
+
+## Architecture rules
+
+- **Two halves, and the line between them is the bundle.**
+  - The eager half is `projects/core/src/lib/tree`, `elements` and `render`. It has no pdfkit,
+    no Yoga and no style parsing.
+  - Everything in `projects/core/src/lib/engine` is reached only through a dynamic
+    `import('../engine')` in `render/pdf-renderer.ts`.
+  - Importing `@ngpdf/core` adds at most 15 KB gzipped to an app's initial bundle, and
+    `scripts/bundle-budget.mjs` enforces it.
+- **Only `engine/index.ts` imports `yoga-layout/load` and `createPdfkitWriter`.** pdfkit stays
+  behind the `PdfWriter` interface in `engine/writer.ts`, so another writer could replace it.
+- **The pipeline is fixed:** component → `PdfNode` tree → `ResolvedStyle` → `Box` tree (Yoga) →
+  pages → `DrawOp[]` → `PdfWriter`. Each stage is plain TypeScript tested on its own output. Do not
+  draw from layout code or lay out from writer code.
+- **No React and no react-pdf code or packages.** The engine is the project's own.
+- **Elements are components.** Each `pdf-*` element is a standalone component with typed inputs;
+  it registers itself as its node's `owner`, and the engine reads `pdfProps()`. Users never need
+  `NO_ERRORS_SCHEMA`.
+- **Every render is isolated.** A render gets its own injector, tree and writer, and destroys the
+  component in `finally`. Two renders at once must not share state.
+- **Patterns in use, and why, are in `docs/ARCHITECTURE.md`:** pipes and filters with a
+  functional core, an Adapter for Angular's renderer, an Adapter behind the `PdfWriter` port, and a
+  Facade for `PdfRenderer`. Trees are plain data with recursive functions, and `DrawOp` is a
+  discriminated union with exhaustive `switch`es. Do not add a pattern without a pressure that
+  calls for it and an entry in that file.
+- **Data between stages is readonly.** A stage returns new data and never mutates its input.
+- **Bounded work.** Parsers are linear (no super-linear regex). Nesting deeper than 64 elements
+  and a text node longer than 1 MB throw an `ngpdf:` error.
+
+## Product rules
+
+- **Selectors:** `pdf-document`, `pdf-page`, `pdf-view`, `pdf-text`, `pdf-image`, `pdf-table`,
+  `pdf-row`, `pdf-cell`, `pdf-page-number`. The `pdf-` prefix is mandatory: `table`, `image` and
+  `text` exist in HTML and SVG.
+- **Units:**
+  - a bare number and `pt` are points;
+  - 1in = 72pt, 1cm = 72/2.54pt, 1mm = 72/25.4pt;
+  - `px` = 1pt;
+  - `%` is of the parent's content box;
+  - any other unit throws.
+- **Page sizes, in points:** A3 841.89×1190.55, A4 595.28×841.89, A5 419.53×595.28, Letter
+  612×792, Legal 612×1008, or `[width, height]`. Landscape swaps them.
+- **Fonts:** only the 14 standard PDF fonts, WinAnsi encoding. A character outside it becomes `?`,
+  with one dev-mode warning per render naming the characters. Custom fonts are v0.2.
+- **Tables:**
+  - Columns are declared on the table: `[columns]` with points, `'Nfr'` or `'N%'`.
+  - Column widths are resolved in this order: fixed widths first, then percentages, then `fr`
+    shares of what is left.
+  - A `pdf-cell` takes its column's width by position, and `span` merges columns.
+  - Content-sized columns are v0.2.
+- **Pagination:**
+  - Units are the children of a page, at any depth through column `pdf-view`s and tables. A table
+    yields its rows as units. A row `pdf-view` is one unit.
+  - A unit is never split.
+  - A `header` row repeats at the top of every page its table runs onto.
+  - `breakBefore` starts a new page.
+  - `pdf-page-number` reserves its height at the bottom of the content area.
+  - A unit taller than a page goes on a page of its own, is clipped, and gets a dev-mode warning.
+  - Wrapper backgrounds and borders are sliced per page.
+- **Text wrapping:** text wraps at Unicode line-break opportunities. A word wider than its box breaks
+  at the box edge.
+- **Images:**
+  - Formats are PNG and JPEG, from a data URL, an http(s) URL, a `Blob` or an `ArrayBuffer`.
+  - `object-fit` is `contain` (default) or `cover`.
+  - A failed load rejects the render with `ngpdf: could not load image "<src>": <reason>`.
+- **Out of v0.1:**
+  - server rendering;
+  - custom fonts;
+  - SVG, links, bookmarks;
+  - splitting a text block across pages;
+  - hyphenation, justify, RTL;
+  - forms, encryption;
+  - a preview component;
+  - capturing the DOM.
+
+  Do not add them without a design update.
+
+## Code and repository rules
+
+- **Angular 22:** standalone, zoneless-first (it must also work under zone.js), signals,
+  `input()`/`output()`, `inject()`, and built-in control flow. Follow the `angular-developer`
+  skill. Never set `standalone: true` or `ChangeDetectionStrategy.OnPush` explicitly.
+- **Strict TypeScript.** Prefer `unknown` over `any`.
+- **Files:** kebab-case file names, one concept per file, and specs next to the code (`*.spec.ts`).
+- **Comments:** short and specific to the code, written as a person on the team would write them.
+  No filler and no restating the line below.
+- **Language:** code, comments, docs, commits and PRs are in English.
+- **Naming:** docs say "for Angular". The project never presents itself as an official Angular
+  project.
+- **No company code or data.** Fixtures and the demo use made-up data.
+- **Dependencies:** runtime dependencies stay at pdfkit, yoga-layout and linebreak. A new one
+  needs a reason in the PR and must pass `npm audit` and OSV-Scanner. Vulnerabilities are fixed
+  within the CVSS deadlines in `docs/ENGINEERING.md`.
+- **Output safety:** never write PDF JavaScript, actions, forms or embedded files.
+- **Commits:** Conventional Commits (`feat(core): …`, `fix(core): …`, `chore: …`), with no AI
+  attribution or co-author lines.
+- **Pull requests:** describe what changed and why, and how it was tested. The maintainer reviews
+  the text before anything is pushed or published.

@@ -1,0 +1,6 @@
+.superpowers/
+node_modules/
+dist/
+.angular/
+coverage/
+e2e/out/
