@@ -170,12 +170,12 @@ function sizeImage(
   }
   const ratio = asset.width / asset.height;
   if (width === 'auto' && height === 'auto') {
-    // Measured, so the width can be capped while the height follows it. A column parent that
-    // stretches its children would widen the image to the parent, so only that case (neither the
-    // image nor the parent asks for another alignment) is moved to the start. An explicit
-    // `align-self: stretch` is kept: the image fills the width and its height follows the ratio.
-    if (style.alignSelf === 'auto' && parent?.flexDirection === 'column') {
-      if (parent.alignItems === 'stretch') node.setAlignSelf(yoga.ALIGN_FLEX_START);
+    // Measured, so the width can be capped while the height follows it. A stretching parent
+    // would widen (column) or lengthen (row) the image away from its ratio, so only that case
+    // (neither the image nor the parent asks for another alignment) is moved to the start.
+    // An explicit `align-self: stretch` is kept: the image fills the width and its height follows the ratio.
+    if (style.alignSelf === 'auto' && parent?.alignItems === 'stretch') {
+      node.setAlignSelf(yoga.ALIGN_FLEX_START);
     }
     node.setMeasureFunc((available, mode) => {
       let fitted = Math.min(asset.width, available);

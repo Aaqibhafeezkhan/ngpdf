@@ -419,6 +419,19 @@ describe('image sizing from the natural size', () => {
     expect(place({}, { 'align-items': 'flex-end' })).toEqual([200, 200, 100]);
   });
 
+  it('keeps the ratio in a row beside a taller sibling', () => {
+    const image = el('pdf-image', {});
+    const tall = el('pdf-view', { height: '300', width: '50' });
+    const parent = el('pdf-view', { width: '400', 'flex-direction': 'row' }, [image, tall]);
+    const box = layoutBox(parent, resolveStyles(parent), 400, {
+      yoga,
+      metrics: writer,
+      images: new Map([[image, { data: new Uint8Array(1), width: 200, height: 100 }]]),
+    });
+    const child = box.children[0];
+    expect([child?.y, child?.w, child?.h]).toEqual([0, 200, 100]);
+  });
+
   it('honours an explicit align-self: stretch, the height following the ratio', () => {
     expect(place({ 'align-self': 'stretch' }, {})).toEqual([0, 400, 200]);
   });
