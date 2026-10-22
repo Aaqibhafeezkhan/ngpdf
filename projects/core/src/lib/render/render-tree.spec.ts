@@ -11,6 +11,7 @@ import {
   LOCALE_ID,
   createEnvironmentInjector,
   inject,
+  input,
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -77,6 +78,42 @@ const FIXED_DATE = new Date(2020, 0, 2);
 })
 class DatedDocument {
   readonly date = FIXED_DATE;
+}
+
+const seen: { injector?: EnvironmentInjector } = {};
+
+@Component({
+  selector: 'pdf-test-throwing',
+  imports: [PDF_ELEMENTS],
+  template: `<pdf-document />`,
+})
+class ThrowingInputDocument {
+  readonly boom = input(0, {
+    transform: (value: number): number => {
+      if (value < 0) throw new Error('bad input');
+      return value;
+    },
+  });
+
+  constructor() {
+    seen.injector = inject(EnvironmentInjector);
+    inject(DestroyRef).onDestroy(() => destroyed.push('throwing-document'));
+  }
+}
+
+@Component({
+  selector: 'pdf-test-throwing-render',
+  imports: [PDF_ELEMENTS],
+  template: `<pdf-document [title]="explode()" />`,
+})
+class ThrowingRenderDocument {
+  constructor() {
+    inject(DestroyRef).onDestroy(() => destroyed.push('throwing-render'));
+  }
+
+  explode(): string {
+    throw new Error('bad template');
+  }
 }
 
 describe('renderTree', () => {
@@ -152,6 +189,27 @@ describe('renderTree', () => {
     destroyed.length = 0;
     const result = render(TestDocument, parent);
     expect(destroyed).toEqual([]);
+    result.destroy();
+    expect(destroyed).toEqual(['test-document']);
+  });
+
+  it('destroys the component and its injector and rethrows when an input setter throws', () => {
+    destroyed.length = 0;
+    expect(() => renderTree(ThrowingInputDocument, parent, { boom: -1 })).toThrow('bad input');
+    expect(destroyed).toEqual(['throwing-document']);
+    expect(() => seen.injector?.get(GREETING, null)).toThrow(/destroyed/i);
+  });
+
+  it('destroys the component and rethrows when change detection throws', () => {
+    destroyed.length = 0;
+    expect(() => renderTree(ThrowingRenderDocument, parent)).toThrow('bad template');
+    expect(destroyed).toEqual(['throwing-render']);
+  });
+
+  it('destroy is idempotent', () => {
+    destroyed.length = 0;
+    const result = render(TestDocument, parent);
+    result.destroy();
     result.destroy();
     expect(destroyed).toEqual(['test-document']);
   });
