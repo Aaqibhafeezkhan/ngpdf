@@ -1,0 +1,142 @@
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { ROOT_TEXT_STYLE, type TextStyle } from './style';
+import { layoutText, measureText } from './text';
+import { createPdfkitWriter, type PdfWriter } from './writer';
+
+const MEASURE_MODE_UNDEFINED = 0;
+const MEASURE_MODE_AT_MOST = 2;
+
+const style: TextStyle = {
+  ...ROOT_TEXT_STYLE,
+  fontFamily: 'Helvetica',
+  fontSize: 9,
+  lineHeight: 1.5,
+};
+
+describe('layoutText', () => {
+  let writer: PdfWriter;
+  beforeAll(async () => {
+    writer = await createPdfkitWriter({ compress: false });
+  });
+
+  it('wraps a name at word boundaries', () => {
+    const block = layoutText('Gabriela Teixeira de Albuquerque Cavalcanti', style, 120, writer);
+    expect(block.lines).toHaveLength(2);
+    for (const line of block.lines) expect(line.width).toBeLessThanOrEqual(120);
+    expect(block.lines.map((line) => line.text).join(' ')).toBe(
+      'Gabriela Teixeira de Albuquerque Cavalcanti',
+    );
+  });
+
+  it('positions lines by the line height and reports the block size', () => {
+    const block = layoutText('Gabriela Teixeira de Albuquerque Cavalcanti', style, 120, writer);
+    expect(block.lines.map((line) => line.y)).toEqual([0, 13.5]);
+    expect(block.height).toBe(27);
+    expect(block.width).toBe(Math.max(...block.lines.map((line) => line.width)));
+  });
+
+  it('collapses runs of whitespace into one space', () => {
+    const block = layoutText('a   b\n c', style, 500, writer);
+    expect(block.lines.map((line) => line.text)).toEqual(['a b c']);
+  });
+
+  it('trims whitespace at the ends of the text and of each line', () => {
+    const block = layoutText('  hello \n world  ', style, 500, writer);
+    expect(block.lines.map((line) => line.text)).toEqual(['hello world']);
+    const narrow = layoutText('hello world', style, 30, writer);
+    expect(narrow.lines.map((line) => line.text)).toEqual(['hello', 'world']);
+  });
+
+  it('splits a long e-mail address that is wider than its box', () => {
+    const block = layoutText('pessoa140@empresa-muito-longa.com.br', style, 60, writer);
+    expect(block.lines.length).toBeGreaterThanOrEqual(2);
+    for (const line of block.lines) expect(line.width).toBeLessThanOrEqual(60);
+    expect(block.lines.map((line) => line.text).join('')).toBe(
+      'pessoa140@empresa-muito-longa.com.br',
+    );
+  });
+
+  it('splits a long word with no break opportunity at the last character that fits', () => {
+    const block = layoutText('abcdefghijklmnopqrstuvwxyz', style, 40, writer);
+    expect(block.lines.length).toBeGreaterThan(1);
+    for (const line of block.lines) expect(line.width).toBeLessThanOrEqual(40);
+    expect(block.lines.map((line) => line.text).join('')).toBe('abcdefghijklmnopqrstuvwxyz');
+  });
+
+  it('continues after a split word on the same line when the next word fits', () => {
+    const block = layoutText('abcdefghijklmnopqrstuvwxyz ok', style, 100, writer);
+    expect(block.lines.map((line) => line.text).join('')).toContain('abcdefghijklmnopqrstuvwxyz');
+    expect(block.lines.at(-1)?.text.endsWith('ok')).toBe(true);
+  });
+
+  it('puts one character per line when the box is narrower than a character', () => {
+    const block = layoutText('abc', style, 1, writer);
+    expect(block.lines.map((line) => line.text)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('returns no lines and zero height for empty or blank text', () => {
+    for (const text of ['', '   \n ']) {
+      const block = layoutText(text, style, 100, writer);
+      expect(block).toEqual({ lines: [], width: 0, height: 0 });
+    }
+  });
+
+  it('puts everything on one line when the width is unbounded', () => {
+    const block = layoutText('one two three four', style, Infinity, writer);
+    expect(block.lines).toHaveLength(1);
+    expect(block.width).toBeCloseTo(writer.widthOf('one two three four', 'Helvetica', 9), 6);
+  });
+
+  it('measures what will be drawn: unsupported characters become ? and warn', () => {
+    const warn = vi.fn();
+    const block = layoutText('a\u{1F600}b', style, 500, writer, warn);
+    expect(block.lines.map((line) => line.text)).toEqual(['a?b']);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(['\u{1F600}']);
+  });
+
+  it('does not collapse a non-breaking space', () => {
+    const block = layoutText('a  b', style, 500, writer);
+    expect(block.lines.map((line) => line.text)).toEqual(['a  b']);
+  });
+
+  it('accepts text of exactly 1 MB and rejects one code unit more', () => {
+    const limit = 1_048_576;
+    expect(() => layoutText('a'.repeat(limit), style, Infinity, writer)).not.toThrow();
+    expect(() => layoutText('a'.repeat(limit + 1), style, Infinity, writer)).toThrow(
+      'ngpdf: text longer than 1 MB',
+    );
+  });
+});
+
+describe('measureText', () => {
+  let writer: PdfWriter;
+  beforeAll(async () => {
+    writer = await createPdfkitWriter({ compress: false });
+  });
+  const text = 'Gabriela Teixeira de Albuquerque Cavalcanti';
+
+  it('returns the single-line size when the width mode is undefined', () => {
+    const size = measureText(text, style, writer)(0, MEASURE_MODE_UNDEFINED);
+    expect(size.width).toBeCloseTo(writer.widthOf(text, 'Helvetica', 9), 6);
+    expect(size.height).toBe(13.5);
+  });
+
+  it('wraps at the given width', () => {
+    const size = measureText(text, style, writer)(120, MEASURE_MODE_AT_MOST);
+    expect(size.width).toBeLessThanOrEqual(120);
+    expect(size.height).toBe(27);
+  });
+
+  it('measures empty text as zero by zero', () => {
+    expect(measureText('', style, writer)(100, MEASURE_MODE_AT_MOST)).toEqual({
+      width: 0,
+      height: 0,
+    });
+  });
+
+  it('rejects text over 1 MB when the measure function is created', () => {
+    expect(() => measureText('a'.repeat(1_048_577), style, writer)).toThrow(
+      'ngpdf: text longer than 1 MB',
+    );
+  });
+});
