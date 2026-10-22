@@ -1,0 +1,203 @@
+import { propsOf } from '../tree/node';
+import { fontFor, toWinAnsi } from './fonts';
+import { fitImage } from './images';
+import type { Box } from './layout';
+import type { PageLayout, PlacedBox } from './paginate';
+import type { Edges, Length, ResolvedStyle } from './style';
+import type { DrawOp, FontMetrics } from './writer';
+
+export interface DisplayListOptions {
+  /** Measures the page number text; without it the number is placed at the left of its box. */
+  readonly metrics?: FontMetrics;
+  /** Receives the characters of the page number format that WinAnsi cannot show. */
+  readonly warn?: (chars: string[]) => void;
+}
+
+const DEFAULT_FORMAT = '{page} / {total}';
+
+function lengthIn(length: Length, base: number): number {
+  if (length === 'auto') return 0;
+  return typeof length === 'number' ? length : (length.percent / 100) * base;
+}
+
+/** The inset of each side (padding plus border), percentages taken of `base`. */
+function insets(style: ResolvedStyle, base: number): Edges<number> {
+  const side = (edge: keyof Edges<Length>): number =>
+    lengthIn(style.padding[edge], base) + style.borderWidth[edge];
+  return { top: side('top'), right: side('right'), bottom: side('bottom'), left: side('left') };
+}
+
+interface Cuts {
+  readonly top: boolean;
+  readonly bottom: boolean;
+}
+
+/**
+ * Clipping: a clipped box carries `limit`, the page y below which nothing is drawn. Rects and
+ * lines are shortened to it, text lines that would end below it are dropped, and images get
+ * their `clip` rectangle cut at it. No op gained a clip field.
+ */
+function drawBox(
+  box: Box,
+  x: number,
+  y: number,
+  limit: number,
+  cuts: Cuts,
+  parentWidth: number,
+  out: DrawOp[],
+): void {
+  const { style } = box;
+  const { opacity } = style;
+
+  const bottomEdge = Math.min(y + box.h, limit);
+  if (style.backgroundColor !== null && bottomEdge > y) {
+    out.push({
+      op: 'rect',
+      x,
+      y,
+      w: box.w,
+      h: bottomEdge - y,
+      radius: style.borderRadius,
+      fill: style.backgroundColor,
+      opacity,
+    });
+  }
+
+  const { top, right, bottom, left } = style.borderWidth;
+  const color = style.borderColor;
+  const line = (x1: number, y1: number, x2: number, y2: number, width: number, c: string): void => {
+    const cutY1 = Math.min(y1, limit);
+    const cutY2 = Math.min(y2, limit);
+    // A line wholly below the limit is gone; a vertical one is shortened.
+    if (y1 >= limit && y2 >= limit) return;
+    out.push({ op: 'line', x1, y1: cutY1, x2, y2: cutY2, width, color: c });
+  };
+  if (top > 0 && !cuts.top) line(x, y + top / 2, x + box.w, y + top / 2, top, color.top);
+  if (right > 0)
+    line(x + box.w - right / 2, y, x + box.w - right / 2, y + box.h, right, color.right);
+  if (bottom > 0 && !cuts.bottom) {
+    line(x, y + box.h - bottom / 2, x + box.w, y + box.h - bottom / 2, bottom, color.bottom);
+  }
+  if (left > 0) line(x + left / 2, y, x + left / 2, y + box.h, left, color.left);
+
+  const inset = insets(style, parentWidth);
+  const contentLeft = x + inset.left;
+  const contentTop = y + inset.top;
+  const contentWidth = Math.max(0, box.w - inset.left - inset.right);
+  const contentHeight = Math.max(0, box.h - inset.top - inset.bottom);
+
+  for (const child of box.children) {
+    const nested = { top: false, bottom: false };
+    drawBox(child, x + child.x, y + child.y, limit, nested, contentWidth, out);
+  }
+
+  if (box.text) {
+    const font = fontFor(style);
+    const lineHeight = style.fontSize * style.lineHeight;
+    for (const textLine of box.text.lines) {
+      const lineTop = contentTop + textLine.y;
+      if (lineTop + lineHeight > limit + 1e-6) continue;
+      out.push({
+        op: 'text',
+        x: alignedX(contentLeft, contentWidth, textLine.width, style.textAlign),
+        y: lineTop,
+        text: textLine.text,
+        font,
+        size: style.fontSize,
+        color: style.color,
+        opacity,
+        underline: style.textDecoration === 'underline',
+        strike: style.textDecoration === 'line-through',
+      });
+    }
+  }
+
+  if (box.image) {
+    const fitted = fitImage(box.image, { w: contentWidth, h: contentHeight }, style.objectFit);
+    const clipHeight = Math.min(contentTop + contentHeight, limit) - contentTop;
+    if (clipHeight > 0) {
+      out.push({
+        op: 'image',
+        x: contentLeft + fitted.x,
+        y: contentTop + fitted.y,
+        w: fitted.w,
+        h: fitted.h,
+        clip: { x: contentLeft, y: contentTop, w: contentWidth, h: clipHeight },
+        data: box.image.data,
+        opacity,
+      });
+    }
+  }
+}
+
+function alignedX(
+  left: number,
+  contentWidth: number,
+  lineWidth: number,
+  align: ResolvedStyle['textAlign'],
+): number {
+  if (align === 'right') return left + contentWidth - lineWidth;
+  if (align === 'center') return left + (contentWidth - lineWidth) / 2;
+  return left;
+}
+
+function drawPlaced(placed: PlacedBox, pageWidth: number, out: DrawOp[]): void {
+  drawBox(
+    placed.box,
+    placed.x,
+    placed.y,
+    placed.clipBottom ?? Infinity,
+    { top: placed.sliceTop === true, bottom: placed.sliceBottom === true },
+    // The wrapper that holds a unit is not recorded; the page width is the nearest known base.
+    pageWidth,
+    out,
+  );
+}
+
+/**
+ * The draw operations of one page, in paint order: decorations, then the placed units, then the
+ * page number. Within a box: background, borders, children, then its own text and image.
+ */
+export function displayList(
+  page: PageLayout,
+  pageIndex: number,
+  pageCount: number,
+  pageNumberFormat?: string,
+  options: DisplayListOptions = {},
+): DrawOp[] {
+  const out: DrawOp[] = [];
+  for (const decoration of page.decorations) drawPlaced(decoration, page.width, out);
+  for (const placed of page.placed) drawPlaced(placed, page.width, out);
+
+  if (page.pageNumber) {
+    const { box, x, y } = page.pageNumber;
+    drawBox(box, x, y, Infinity, { top: false, bottom: false }, page.width, out);
+    const format = pageNumberFormat ?? stringProp(propsOf(box.node)['format']) ?? DEFAULT_FORMAT;
+    const filled = format
+      .replaceAll('{page}', () => String(pageIndex + 1))
+      .replaceAll('{total}', () => String(pageCount));
+    const text = toWinAnsi(filled, options.warn ?? (() => undefined));
+    const { style } = box;
+    const font = fontFor(style);
+    const inset = insets(style, page.width);
+    const contentWidth = Math.max(0, box.w - inset.left - inset.right);
+    const width = options.metrics?.widthOf(text, font, style.fontSize) ?? 0;
+    out.push({
+      op: 'text',
+      x: alignedX(x + inset.left, contentWidth, width, style.textAlign),
+      y: y + inset.top,
+      text,
+      font,
+      size: style.fontSize,
+      color: style.color,
+      opacity: style.opacity,
+      underline: style.textDecoration === 'underline',
+      strike: style.textDecoration === 'line-through',
+    });
+  }
+  return out;
+}
+
+function stringProp(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}

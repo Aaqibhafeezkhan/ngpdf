@@ -1,0 +1,254 @@
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Yoga } from 'yoga-layout/load';
+import { createNode, type PdfNode } from '../tree/node';
+import { displayList } from './display-list';
+import type { ImageAsset } from './images';
+import type { LayoutContext } from './layout';
+import { pageSize, paginatePage, type PageLayout } from './paginate';
+import { resolveStyles } from './style';
+import { createPdfkitWriter, type DrawOp, type PdfWriter } from './writer';
+
+let yoga: Yoga;
+let writer: PdfWriter;
+beforeAll(async () => {
+  const { loadYoga } = await import('yoga-layout/load');
+  yoga = await loadYoga();
+  writer = await createPdfkitWriter({ compress: false });
+});
+
+function el(
+  tag: string,
+  style: Record<string, string> = {},
+  children: PdfNode[] = [],
+  props: Record<string, unknown> = {},
+): PdfNode {
+  const node = createNode('element', tag);
+  node.rawStyle = style;
+  node.owner = { pdfProps: () => props };
+  for (const child of children) {
+    child.parent = node;
+    node.children.push(child);
+  }
+  return node;
+}
+
+function text(content: string, style: Record<string, string> = {}): PdfNode {
+  const node = el('pdf-text', style);
+  const run = createNode('text', '', content);
+  run.parent = node;
+  node.children.push(run);
+  return node;
+}
+
+function page(
+  children: PdfNode[],
+  style: Record<string, string> = { padding: '36' },
+  props: Record<string, unknown> = { size: 'A4', orientation: 'portrait' },
+): PdfNode {
+  return el('pdf-page', style, children, props);
+}
+
+function layout(root: PdfNode, images = new Map<PdfNode, ImageAsset>()): PageLayout[] {
+  const ctx: LayoutContext = { yoga, metrics: writer, images };
+  return paginatePage(root, resolveStyles(root), ctx);
+}
+
+type Op<K extends DrawOp['op']> = Extract<DrawOp, { op: K }>;
+
+function only<K extends DrawOp['op']>(ops: readonly DrawOp[], kind: K): Op<K>[] {
+  return ops.filter((op): op is Op<K> => op.op === kind);
+}
+
+describe('displayList', () => {
+  it('draws a background rect before the ops of the box children', () => {
+    const root = page([el('pdf-view', { 'background-color': '#DD0031' }, [text('Hello')])]);
+    const ops = displayList(layout(root)[0]!, 0, 1);
+    expect(ops.map((op) => op.op)).toEqual(['rect', 'text']);
+    expect(ops[0]).toMatchObject({ op: 'rect', fill: '#DD0031', radius: 0, opacity: 1 });
+    expect(ops[1]).toMatchObject({ op: 'text', text: 'Hello', x: 36, y: 36 });
+  });
+
+  it('passes radius and opacity to the background rect', () => {
+    const style = {
+      'background-color': '#000',
+      'border-radius': '6',
+      opacity: '0.5',
+      height: '20',
+    };
+    const [rect] = only(displayList(layout(page([el('pdf-view', style)]))[0]!, 0, 1), 'rect');
+    expect(rect).toMatchObject({ radius: 6, opacity: 0.5, h: 20 });
+  });
+
+  it('draws one line per border side with a width', () => {
+    const style = { 'border-top': '2 solid #f00', 'border-left': '1 solid #0f0', height: '30' };
+    const ops = displayList(layout(page([el('pdf-view', style)]))[0]!, 0, 1);
+    const lines = only(ops, 'line');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({ y1: 37, y2: 37, width: 2, color: '#f00' });
+    expect(lines[1]).toMatchObject({ x1: 36.5, x2: 36.5, y1: 36, y2: 66, width: 1 });
+  });
+
+  it('puts right-aligned text at box right minus padding minus line width', () => {
+    const view = text('Total', { 'text-align': 'right', width: '200', padding: '10' });
+    const ops = displayList(layout(page([view]))[0]!, 0, 1);
+    const [line] = only(ops, 'text');
+    const lineWidth = writer.widthOf('Total', 'Helvetica', 10);
+    expect(line!.x).toBeCloseTo(36 + 200 - 10 - lineWidth, 6);
+    expect(line!.y).toBe(46);
+  });
+
+  it('centers text and sets underline and strike flags', () => {
+    const centered = text('Mid', { 'text-align': 'center', width: '100' });
+    const under = text('U', { 'text-decoration': 'underline' });
+    const struck = text('S', { 'text-decoration': 'line-through' });
+    const ops = displayList(layout(page([centered, under, struck]))[0]!, 0, 1);
+    const lines = only(ops, 'text');
+    expect(lines[0]!.x).toBeCloseTo(36 + (100 - writer.widthOf('Mid', 'Helvetica', 10)) / 2, 6);
+    expect(lines.map((l) => [l.underline, l.strike])).toEqual([
+      [false, false],
+      [true, false],
+      [false, true],
+    ]);
+  });
+
+  it('draws the page number from the format with page and total', () => {
+    const number = el('pdf-page-number', { height: '9' }, [], { format: '{page} / {total}' });
+    const [first] = layout(page([text('a'), number]));
+    const ops = displayList(first!, 1, 5, 'Página {page} de {total}', { metrics: writer });
+    const last = only(ops, 'text').at(-1)!;
+    expect(last.text).toBe('Página 2 de 5');
+    // Right-aligned by default, inside the padding.
+    expect(last.x).toBeCloseTo(595.28 - 36 - writer.widthOf('Página 2 de 5', 'Helvetica', 10), 3);
+  });
+
+  it('reads the format from the page number props and replaces every placeholder', () => {
+    const number = el('pdf-page-number', {}, [], { format: '{page}-{page}/{total}$&' });
+    const [first] = layout(page([number]));
+    const last = only(displayList(first!, 0, 3), 'text').at(-1)!;
+    expect(last.text).toBe('1-1/3$&');
+  });
+
+  it('reports characters of the page number format outside WinAnsi', () => {
+    const number = el('pdf-page-number', {}, [], { format: 'Ω {page}' });
+    const warn = vi.fn<(chars: string[]) => void>();
+    const [first] = layout(page([number]));
+    const last = only(displayList(first!, 0, 1, undefined, { warn }), 'text').at(-1)!;
+    expect(last.text).toBe('? 1');
+    expect(warn).toHaveBeenCalledWith(['Ω']);
+  });
+
+  it('uses the default format when the page number has no props', () => {
+    const number = el('pdf-page-number');
+    number.owner = null;
+    const [first] = layout(page([number]));
+    expect(only(displayList(first!, 0, 2), 'text').at(-1)!.text).toBe('1 / 2');
+  });
+
+  it('gives a landscape A4 page the swapped size', () => {
+    const root = page([text('x')], { padding: '36' }, { size: 'A4', orientation: 'landscape' });
+    expect(pageSize(root).width).toBe(841.89);
+    expect(layout(root)[0]!.width).toBe(841.89);
+  });
+
+  it('draws the page decoration before the units', () => {
+    const root = page([text('x')], { padding: '36', 'background-color': '#eee' });
+    const ops = displayList(layout(root)[0]!, 0, 1);
+    expect(ops[0]).toMatchObject({ op: 'rect', fill: '#eee', x: 0, y: 0, w: 595.28 });
+  });
+
+  describe('slices', () => {
+    function sliced(): PageLayout[] {
+      const rows = [0, 1, 2].map(() => el('pdf-view', { height: '300' }));
+      const wrapper = el('pdf-view', { border: '2 solid #123456' }, rows);
+      return layout(page([wrapper]));
+    }
+
+    it('draws no border on an edge cut by a page break', () => {
+      const pages = sliced();
+      expect(pages).toHaveLength(2);
+      const horizontal = (index: number): Op<'line'>[] =>
+        only(displayList(pages[index]!, index, 2), 'line').filter((l) => l.y1 === l.y2);
+      // Page 1 keeps the top edge only; page 2 keeps the bottom edge only.
+      expect(horizontal(0)).toHaveLength(1);
+      expect(horizontal(0)[0]!.y1).toBeCloseTo(37, 6);
+      expect(horizontal(1)).toHaveLength(1);
+      expect(horizontal(1)[0]!.y1).toBeGreaterThan(37);
+      for (const index of [0, 1]) {
+        const vertical = only(displayList(pages[index]!, index, 2), 'line').filter(
+          (l) => l.x1 === l.x2,
+        );
+        expect(vertical).toHaveLength(2);
+      }
+    });
+  });
+
+  describe('clipping', () => {
+    function tall(): PageLayout {
+      const spacer = el('pdf-view', { height: '780' });
+      const column = el('pdf-view', { 'flex-grow': '1' }, [
+        text('visible'),
+        spacer,
+        text('hidden'),
+      ]);
+      // A row view is one unit, so the page cannot split it.
+      const style = { 'flex-direction': 'row', 'background-color': '#abc' };
+      const unit = el('pdf-view', { ...style, 'border-bottom': '2 solid #000' }, [column]);
+      return layout(page([unit, el('pdf-page-number', { height: '9' }, [], { format: 'n' })]))[0]!;
+    }
+
+    it('draws nothing below clipBottom', () => {
+      const laid = tall();
+      const limit = laid.placed[0]!.clipBottom!;
+      expect(limit).toBeCloseTo(841.89 - 36 - 9, 6);
+      const ops = displayList(laid, 0, 1).slice(0, -1);
+      for (const op of ops) {
+        if (op.op === 'rect') expect(op.y + op.h).toBeLessThanOrEqual(limit + 1e-6);
+        if (op.op === 'text') expect(op.y + op.size * 1.2).toBeLessThanOrEqual(limit + 1e-6);
+        if (op.op === 'line') expect(Math.max(op.y1, op.y2)).toBeLessThanOrEqual(limit + 1e-6);
+      }
+      expect(only(ops, 'text').map((t) => t.text)).toEqual(['visible']);
+      expect(only(ops, 'rect')).toHaveLength(1);
+      // The bottom border lies below the limit and is dropped.
+      expect(only(ops, 'line')).toHaveLength(0);
+    });
+  });
+
+  describe('images', () => {
+    const asset: ImageAsset = { data: new Uint8Array([1]), width: 100, height: 50 };
+
+    function drawn(fit: string, extra: Record<string, string> = {}): Op<'image'> {
+      const image = el('pdf-image', { width: '40', height: '40', 'object-fit': fit, ...extra });
+      const ops = displayList(layout(page([image]), new Map([[image, asset]]))[0]!, 0, 1);
+      return only(ops, 'image')[0]!;
+    }
+
+    it('fits the image in the box and clips it to the box', () => {
+      const op = drawn('contain');
+      expect(op).toMatchObject({ x: 36, w: 40, h: 20, opacity: 1, data: asset.data });
+      expect(op.y).toBe(36 + 10);
+      expect(op.clip).toEqual({ x: 36, y: 36, w: 40, h: 40 });
+    });
+
+    it('lets cover overflow the box but not the clip', () => {
+      const op = drawn('cover', { opacity: '0.5', padding: '4' });
+      expect(op.opacity).toBe(0.5);
+      expect(op.w).toBeGreaterThan(op.clip.w);
+      expect(op.clip).toEqual({ x: 40, y: 40, w: 32, h: 32 });
+    });
+
+    const rowOf = (child: PdfNode): PdfNode =>
+      el('pdf-view', { 'flex-direction': 'row', height: '1000' }, [child]);
+
+    it('cuts the image clip at clipBottom and drops an image below it', () => {
+      const spacer = el('pdf-view', { height: '760' });
+      const image = el('pdf-image', { width: '100', height: '100' });
+      const unit = rowOf(el('pdf-view', {}, [spacer, image]));
+      const laid = layout(page([unit]), new Map([[image, asset]]))[0]!;
+      const [op] = only(displayList(laid, 0, 1), 'image');
+      expect(op!.clip.y + op!.clip.h).toBeCloseTo(841.89 - 36, 6);
+      const hidden = rowOf(el('pdf-view', {}, [el('pdf-view', { height: '900' }), image]));
+      const none = layout(page([hidden]), new Map([[image, asset]]))[0]!;
+      expect(only(displayList(none, 0, 1), 'image')).toHaveLength(0);
+    });
+  });
+});

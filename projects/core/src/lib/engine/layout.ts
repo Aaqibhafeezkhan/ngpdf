@@ -28,6 +28,8 @@ export interface LayoutContext {
    * each kind per `layoutBox` call. The caller decides where they go.
    */
   readonly warn?: (message: string) => void;
+  /** Characters outside WinAnsi found in laid-out text; the caller merges them into one warning. */
+  readonly warnChars?: (chars: string[]) => void;
 }
 
 type Measure = (width: number, widthMode: number) => { width: number; height: number };
@@ -382,7 +384,13 @@ export function layoutBox(
       h: yogaNode.getComputedHeight(),
       ...(built.isText
         ? {
-            text: layoutText(textContent(current), style, contentWidthOf(yogaNode), ctx.metrics),
+            text: layoutText(
+              textContent(current),
+              style,
+              contentWidthOf(yogaNode),
+              ctx.metrics,
+              ctx.warnChars,
+            ),
           }
         : {}),
       ...(image ? { image } : {}),
