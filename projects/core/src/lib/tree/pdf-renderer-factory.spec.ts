@@ -140,6 +140,110 @@ describe('PdfRendererFactory styles', () => {
   });
 });
 
+describe('PdfRendererFactory edge cases', () => {
+  it('keeps a --custom property name as written, in the attribute and in setStyle', () => {
+    const r = setup();
+    const el = r.createElement('x') as PdfNode;
+    r.setAttribute(el, 'style', '--Accent-Color: red; fontSize: 9');
+    expect(el.rawStyle).toEqual({ '--Accent-Color': 'red', 'font-size': '9' });
+    r.setStyle(el, '--gapSize', 4);
+    expect(el.rawStyle['--gapSize']).toBe('4');
+    r.removeStyle(el, '--gapSize');
+    expect(el.rawStyle['--gapSize']).toBeUndefined();
+  });
+
+  it('keeps !important as part of the value', () => {
+    const r = setup();
+    const el = r.createElement('x') as PdfNode;
+    r.setAttribute(el, 'style', 'color: red !important');
+    expect(el.rawStyle).toEqual({ color: 'red !important' });
+    r.setStyle(el, 'padding', '4 !important');
+    expect(el.rawStyle['padding']).toBe('4 !important');
+  });
+
+  it('skips declarations without a name or a colon', () => {
+    const r = setup();
+    const el = r.createElement('x') as PdfNode;
+    r.setAttribute(el, 'style', ': red; junk; color: blue');
+    expect(el.rawStyle).toEqual({ color: 'blue' });
+  });
+
+  it('appends when the reference child is not in the parent', () => {
+    const r = setup();
+    const p = r.createElement('p') as PdfNode;
+    const other = r.createElement('o') as PdfNode;
+    const a = r.createElement('a') as PdfNode;
+    const b = r.createElement('b') as PdfNode;
+    const stranger = r.createElement('s') as PdfNode;
+    r.appendChild(p, a);
+    r.appendChild(other, stranger);
+    r.insertBefore(p, b, stranger);
+    expect(p.children).toEqual([a, b]);
+    expect(b.parent).toBe(p);
+    expect(other.children).toEqual([stranger]);
+  });
+
+  it('removeChild with the wrong parent leaves the child where it is', () => {
+    const r = setup();
+    const p = r.createElement('p') as PdfNode;
+    const wrong = r.createElement('w') as PdfNode;
+    const a = r.createElement('a') as PdfNode;
+    r.appendChild(p, a);
+    r.removeChild(wrong, a);
+    expect(p.children).toEqual([a]);
+    expect(a.parent).toBe(p);
+  });
+
+  it('removeChild with a null parent detaches from the real parent', () => {
+    const r = setup();
+    const p = r.createElement('p') as PdfNode;
+    const a = r.createElement('a') as PdfNode;
+    r.appendChild(p, a);
+    r.removeChild(null, a);
+    expect(p.children).toEqual([]);
+    expect(a.parent).toBeNull();
+  });
+
+  it('removeChild with a null parent on a detached node does nothing', () => {
+    const r = setup();
+    const a = r.createElement('a') as PdfNode;
+    r.removeChild(null, a);
+    expect(a.parent).toBeNull();
+  });
+
+  it('setAttribute("style") after setStyle replaces the whole style', () => {
+    const r = setup();
+    const el = r.createElement('x') as PdfNode;
+    r.setStyle(el, 'color', 'red');
+    r.setStyle(el, 'padding', '4');
+    r.setAttribute(el, 'style', 'margin: 2');
+    expect(el.rawStyle).toEqual({ margin: '2' });
+  });
+
+  it('setStyle after setAttribute("style") adds to it', () => {
+    const r = setup();
+    const el = r.createElement('x') as PdfNode;
+    r.setAttribute(el, 'style', 'margin: 2');
+    r.setStyle(el, 'color', 'red');
+    expect(el.rawStyle).toEqual({ margin: '2', color: 'red' });
+  });
+
+  it('removeAttribute("style") clears the style but other attributes do not', () => {
+    const r = setup();
+    const el = r.createElement('x') as PdfNode;
+    r.setAttribute(el, 'style', 'margin: 2');
+    r.removeAttribute(el, 'title');
+    expect(el.rawStyle).toEqual({ margin: '2' });
+    r.removeAttribute(el, 'style');
+    expect(el.rawStyle).toEqual({});
+  });
+
+  it('nextSibling is null for a detached node', () => {
+    const r = setup();
+    expect(r.nextSibling(r.createElement('a') as PdfNode)).toBeNull();
+  });
+});
+
 describe('node helpers', () => {
   it('propsOf returns owner props or an empty object', () => {
     const r = setup();
