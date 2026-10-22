@@ -228,3 +228,200 @@ describe('resolveStyles', () => {
     expect(() => resolveStyles(build(100000))).toThrow('ngpdf: nesting deeper than 64');
   });
 });
+
+describe('resolveStyles property coverage', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('maps font-family keywords to the three standard families', () => {
+    expect(styleOf({ 'font-family': 'Courier New, monospace' }).fontFamily).toBe('Courier');
+    expect(styleOf({ 'font-family': 'ui-monospace' }).fontFamily).toBe('Courier');
+    expect(styleOf({ 'font-family': 'Times New Roman' }).fontFamily).toBe('Times');
+    expect(styleOf({ 'font-family': 'Georgia, serif' }).fontFamily).toBe('Times');
+    expect(styleOf({ 'font-family': 'sans-serif' }).fontFamily).toBe('Helvetica');
+    expect(styleOf({ 'font-family': 'Arial' }).fontFamily).toBe('Helvetica');
+  });
+
+  it('resolves text properties', () => {
+    const style = styleOf({
+      color: '#336699',
+      'font-size': '14pt',
+      'font-weight': '700',
+      'font-style': 'oblique',
+      'text-align': 'right',
+      'text-decoration': 'line-through',
+    });
+    expect(style).toMatchObject({
+      color: '#336699',
+      fontSize: 14,
+      fontWeight: 'bold',
+      fontStyle: 'italic',
+      textAlign: 'right',
+      textDecoration: 'line-through',
+    });
+    expect(styleOf({ 'font-weight': '400' }).fontWeight).toBe('normal');
+    expect(styleOf({ 'font-weight': 'bolder' }).fontWeight).toBe('bold');
+    expect(styleOf({ 'font-style': 'normal' }).fontStyle).toBe('normal');
+  });
+
+  it('resolves flex container and item properties', () => {
+    const style = styleOf({
+      'flex-direction': 'row',
+      'flex-grow': '2',
+      'flex-shrink': '0',
+      'flex-basis': '50%',
+      'justify-content': 'space-between',
+      'align-items': 'center',
+      'align-self': 'flex-end',
+      gap: '6',
+    });
+    expect(style).toMatchObject({
+      flexDirection: 'row',
+      flexGrow: 2,
+      flexShrink: 0,
+      flexBasis: { percent: 50 },
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      alignSelf: 'flex-end',
+      gap: 6,
+    });
+  });
+
+  it('resolves size, background, radius, opacity and object-fit', () => {
+    const style = styleOf({
+      width: '50%',
+      height: '2cm',
+      'min-width': '10',
+      'min-height': '11',
+      'max-width': '12',
+      'max-height': 'auto',
+      'background-color': '#eee',
+      'border-radius': '3',
+      'object-fit': 'cover',
+    });
+    expect(style.width).toEqual({ percent: 50 });
+    expect(style.height).toBeCloseTo(56.693, 3);
+    expect([style.minWidth, style.minHeight, style.maxWidth, style.maxHeight]).toEqual([
+      10,
+      11,
+      12,
+      'auto',
+    ]);
+    expect(style.backgroundColor).toBe('#eee');
+    expect(style.borderRadius).toBe(3);
+    expect(style.objectFit).toBe('cover');
+  });
+
+  it('clamps opacity to 0..1', () => {
+    expect(styleOf({ opacity: '0.4' }).opacity).toBe(0.4);
+    expect(styleOf({ opacity: '3' }).opacity).toBe(1);
+    expect(styleOf({ opacity: '-2' }).opacity).toBe(0);
+  });
+
+  it.each([
+    ['text-align', 'justify'],
+    ['text-decoration', 'overline'],
+    ['flex-direction', 'row-reverse'],
+    ['justify-content', 'start'],
+    ['align-items', 'baseline'],
+    ['align-self', 'baseline'],
+    ['object-fit', 'fill'],
+  ])('rejects an invalid %s value "%s"', (property, value) => {
+    expect(() => styleOf({ [property]: value })).toThrow(
+      `ngpdf: invalid value "${value}" for ${property} on pdf-view`,
+    );
+  });
+
+  it.each(['flex-grow', 'flex-shrink', 'opacity'])('rejects a non-numeric %s', (property) => {
+    expect(() => styleOf({ [property]: 'lots' })).toThrow(
+      `ngpdf: invalid value "lots" for ${property} on pdf-view`,
+    );
+  });
+
+  it('expands the flex shorthand in every form', () => {
+    expect(styleOf({ flex: 'auto' })).toMatchObject({
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: 'auto',
+    });
+    expect(styleOf({ flex: 'none' })).toMatchObject({
+      flexGrow: 0,
+      flexShrink: 0,
+      flexBasis: 'auto',
+    });
+    expect(styleOf({ flex: '3' })).toMatchObject({ flexGrow: 3, flexShrink: 1, flexBasis: 0 });
+    expect(styleOf({ flex: '100pt' })).toMatchObject({
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: 100,
+    });
+    expect(styleOf({ flex: '2 3' })).toMatchObject({ flexGrow: 2, flexShrink: 3, flexBasis: 0 });
+    expect(styleOf({ flex: '2 50%' })).toMatchObject({
+      flexGrow: 2,
+      flexShrink: 1,
+      flexBasis: { percent: 50 },
+    });
+    expect(styleOf({ flex: '1 2 10' })).toMatchObject({
+      flexGrow: 1,
+      flexShrink: 2,
+      flexBasis: 10,
+    });
+  });
+
+  it('rejects malformed flex shorthands', () => {
+    expect(() => styleOf({ flex: '' })).toThrow('ngpdf: expected 1 to 3 values in "" on pdf-view');
+    expect(() => styleOf({ flex: '1 2 3 4' })).toThrow(/^ngpdf: expected 1 to 3 values/);
+    expect(() => styleOf({ flex: 'a 1' })).toThrow('ngpdf: invalid flex-grow in "a 1" on pdf-view');
+    expect(() => styleOf({ flex: '1 b 3' })).toThrow(
+      'ngpdf: invalid flex-shrink in "1 b 3" on pdf-view',
+    );
+  });
+
+  it('parses border shorthand parts in any order and the none keyword', () => {
+    expect(styleOf({ border: 'red solid 3' }).borderColor.top).toBe('red');
+    expect(styleOf({ border: 'red solid 3' }).borderWidth.top).toBe(3);
+    expect(styleOf({ border: 'solid' }).borderWidth.top).toBe(1);
+    expect(styleOf({ border: 'solid' }).borderColor.top).toBe('#000');
+    expect(styleOf({ border: '4 none' }).borderWidth.top).toBe(0);
+    expect(styleOf({ border: 'hidden' }).borderWidth.left).toBe(0);
+    expect(styleOf({ border: '1 solid rgb(1, 2, 3)' }).borderColor.top).toBe('rgb(1, 2, 3)');
+    expect(() => styleOf({ border: '1 solid red blue' })).toThrow(/^ngpdf: too many values/);
+  });
+
+  it('warns for an unsupported border style on a side shorthand too', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    styleOf({ 'border-top': '1 dotted red' });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      'ngpdf: border style "dotted" is not supported; drawing solid',
+    );
+  });
+
+  it('does not warn for solid or none borders', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    styleOf({ border: '1 solid red' });
+    styleOf({ border: 'none' });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('resolves line-height forms', () => {
+    expect(styleOf({ 'line-height': '1.5' }).lineHeight).toBe(1.5);
+    expect(styleOf({ 'line-height': '150%' }).lineHeight).toBe(1.5);
+    expect(styleOf({ 'font-size': '10', 'line-height': '20pt' }).lineHeight).toBe(2);
+    expect(styleOf({ 'line-height': 'normal' }).lineHeight).toBe(ROOT_TEXT_STYLE.lineHeight);
+    expect(() => styleOf({ 'line-height': 'auto' })).toThrow(
+      'ngpdf: invalid line-height "auto" on pdf-view',
+    );
+  });
+
+  it('rejects percent where points are required', () => {
+    expect(() => styleOf({ gap: '10%' })).toThrow('ngpdf: expected a length in "10%" on pdf-view');
+    expect(() => styleOf({ 'font-size': 'auto' })).toThrow(/^ngpdf: expected a length/);
+  });
+
+  it('rejects non-finite numbers and truncates long values in errors', () => {
+    expect(() => parseLength('1e999')).toThrow(/^ngpdf: unknown unit/);
+    expect(() => parseLength('9'.repeat(400))).toThrow(/^ngpdf: invalid length "9{60}\.\.\."/);
+    expect(() => styleOf({ opacity: '9'.repeat(400) })).toThrow(/^ngpdf: invalid value/);
+  });
+});

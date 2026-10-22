@@ -2,25 +2,21 @@ import { describe, expect, it, vi } from 'vitest';
 import { fontFor, toWinAnsi } from './fonts';
 
 describe('fontFor', () => {
-  it('maps family, weight and style to a standard font', () => {
-    expect(fontFor({ fontFamily: 'Times', fontWeight: 'bold', fontStyle: 'italic' })).toBe(
-      'Times-BoldItalic',
-    );
-    expect(fontFor({ fontFamily: 'Helvetica', fontWeight: 'normal', fontStyle: 'normal' })).toBe(
-      'Helvetica',
-    );
-    expect(fontFor({ fontFamily: 'Times', fontWeight: 'normal', fontStyle: 'normal' })).toBe(
-      'Times-Roman',
-    );
-    expect(fontFor({ fontFamily: 'Courier', fontWeight: 'bold', fontStyle: 'normal' })).toBe(
-      'Courier-Bold',
-    );
-    expect(fontFor({ fontFamily: 'Courier', fontWeight: 'normal', fontStyle: 'italic' })).toBe(
-      'Courier-Oblique',
-    );
-    expect(fontFor({ fontFamily: 'Helvetica', fontWeight: 'bold', fontStyle: 'italic' })).toBe(
-      'Helvetica-BoldOblique',
-    );
+  it.each([
+    ['Helvetica', 'normal', 'normal', 'Helvetica'],
+    ['Helvetica', 'bold', 'normal', 'Helvetica-Bold'],
+    ['Helvetica', 'normal', 'italic', 'Helvetica-Oblique'],
+    ['Helvetica', 'bold', 'italic', 'Helvetica-BoldOblique'],
+    ['Times', 'normal', 'normal', 'Times-Roman'],
+    ['Times', 'bold', 'normal', 'Times-Bold'],
+    ['Times', 'normal', 'italic', 'Times-Italic'],
+    ['Times', 'bold', 'italic', 'Times-BoldItalic'],
+    ['Courier', 'normal', 'normal', 'Courier'],
+    ['Courier', 'bold', 'normal', 'Courier-Bold'],
+    ['Courier', 'normal', 'italic', 'Courier-Oblique'],
+    ['Courier', 'bold', 'italic', 'Courier-BoldOblique'],
+  ] as const)('maps %s %s %s to %s', (fontFamily, fontWeight, fontStyle, expected) => {
+    expect(fontFor({ fontFamily, fontWeight, fontStyle })).toBe(expected);
   });
 });
 
