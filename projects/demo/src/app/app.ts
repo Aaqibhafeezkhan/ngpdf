@@ -1,6 +1,30 @@
-import { Component, inject } from '@angular/core';
+import { Component, ElementRef, inject, isDevMode, signal, viewChild } from '@angular/core';
 import { PdfRenderer } from '@ngpdf/core';
-import { SampleDocument } from './sample-document';
+import { captureChart } from './capture-chart';
+import { CHART_BARS, makeCommunicators, makeLicences } from './data';
+import { CaptureReport } from './documents/capture-report';
+import { CommunicatorsList } from './documents/communicators-list';
+import { LicencesList } from './documents/licences-list';
+
+export type DemoDocument = 'capture-report' | 'communicators-list' | 'licences-list';
+
+/** Fixed so the end-to-end text does not depend on the day it runs. */
+const CAPTURED_AT = new Date(2026, 9, 22, 14, 30);
+
+declare global {
+  interface Window {
+    ngpdfDemo?: { render(name: string): Promise<string> };
+  }
+}
+
+function toBase64(bytes: ArrayBuffer): string {
+  let binary = '';
+  const view = new Uint8Array(bytes);
+  for (let i = 0; i < view.length; i += 0x8000) {
+    binary += String.fromCharCode(...view.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
 
 @Component({
   selector: 'app-root',
@@ -9,11 +33,60 @@ import { SampleDocument } from './sample-document';
 })
 export class App {
   private readonly pdf = inject(PdfRenderer);
+  private readonly chart = viewChild.required<ElementRef<HTMLElement>>('chart');
 
-  download(): Promise<void> {
-    return this.pdf.download(SampleDocument, {
-      fileName: 'sample.pdf',
-      inputs: { lines: ['A made-up line', 'Another made-up line'] },
-    });
+  protected readonly bars = CHART_BARS;
+  protected readonly status = signal('Ready.');
+
+  constructor() {
+    if (isDevMode()) {
+      // The end-to-end script drives the demo through this hook; production builds do not have it.
+      window.ngpdfDemo = {
+        render: async (name) =>
+          toBase64(await (await this.blobOf(name as DemoDocument)).arrayBuffer()),
+      };
+    }
+  }
+
+  protected async download(name: DemoDocument): Promise<void> {
+    this.status.set(`Generating ${name}...`);
+    try {
+      const started = performance.now();
+      const blob = await this.blobOf(name);
+      this.save(blob, `${name}.pdf`);
+      this.status.set(
+        `${name}.pdf ready in ${String(Math.round(performance.now() - started))} ms.`,
+      );
+    } catch (error) {
+      this.status.set(error instanceof Error ? error.message : 'Could not generate the PDF.');
+    }
+  }
+
+  private async blobOf(name: DemoDocument): Promise<Blob> {
+    switch (name) {
+      case 'capture-report':
+        return this.pdf.toBlob(CaptureReport, {
+          inputs: {
+            title: 'Relatório de captura',
+            capturedAt: CAPTURED_AT,
+            image: await captureChart(this.chart().nativeElement),
+          },
+        });
+      case 'communicators-list':
+        return this.pdf.toBlob(CommunicatorsList, { inputs: { items: makeCommunicators(140) } });
+      case 'licences-list':
+        return this.pdf.toBlob(LicencesList, { inputs: { items: makeLicences(60) } });
+    }
+  }
+
+  private save(blob: Blob, fileName: string): void {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 0);
   }
 }

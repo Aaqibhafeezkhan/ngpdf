@@ -1,5 +1,17 @@
 <main>
   <h1>ngpdf demo</h1>
-  <p>Write PDFs as Angular components, for Angular.</p>
-  <button type="button" (click)="download()">Download sample PDF</button>
+  <p>Write PDFs as Angular components, for Angular. All data here is made up.</p>
+
+  <div #chart class="chart" aria-label="Made-up monthly chart" role="img">
+    @for (bar of bars; track bar.label) {
+      <div class="bar" [attr.data-label]="bar.label" [style.height.px]="bar.value * 2"></div>
+    }
+  </div>
+
+  <div class="actions">
+    <button type="button" (click)="download('capture-report')">Capture report</button>
+    <button type="button" (click)="download('communicators-list')">Communicators list</button>
+    <button type="button" (click)="download('licences-list')">Licences list</button>
+  </div>
+  <p role="status">{{ status() }}</p>
 </main>
