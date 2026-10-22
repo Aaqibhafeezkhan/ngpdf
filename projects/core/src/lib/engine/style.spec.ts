@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNode, type PdfNode } from '../tree/node';
 import { parseLength, resolveStyles, ROOT_TEXT_STYLE } from './style';
 
@@ -43,6 +43,10 @@ describe('parseLength', () => {
 });
 
 describe('resolveStyles', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('uses root text defaults', () => {
     const style = styleOf({});
     expect(style).toMatchObject(ROOT_TEXT_STYLE);
@@ -89,9 +93,39 @@ describe('resolveStyles', () => {
   });
 
   it('applies border to all sides and draws other styles solid', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const style = styleOf({ border: '2pt dashed red' });
     expect(style.borderWidth).toEqual({ top: 2, right: 2, bottom: 2, left: 2 });
     expect(style.borderColor.left).toBe('red');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(/^ngpdf:/);
+  });
+
+  it('expands border-width and border-color like margin', () => {
+    const style = styleOf({ 'border-width': '1 2', 'border-color': 'red blue green' });
+    expect(style.borderWidth).toEqual({ top: 1, right: 2, bottom: 1, left: 2 });
+    expect(style.borderColor).toEqual({ top: 'red', right: 'blue', bottom: 'green', left: 'blue' });
+    expect(() => styleOf({ 'border-width': '1 2 3 4 5' })).toThrow(/^ngpdf:/);
+    expect(() => styleOf({ 'border-width': '2%' })).toThrow(/^ngpdf:/);
+  });
+
+  it('sets one side with the border-<side>-width and -color longhands', () => {
+    const width = styleOf({ 'border-top-width': '3', 'border-left-width': '1mm' });
+    expect(width.borderWidth.top).toBe(3);
+    expect(width.borderWidth.left).toBeCloseTo(2.835, 3);
+    expect(width.borderWidth.right).toBe(0);
+    const color = styleOf({ 'border-right-color': 'blue', 'border-bottom-color': '#abc' });
+    expect(color.borderColor).toEqual({ top: '#000', right: 'blue', bottom: '#abc', left: '#000' });
+  });
+
+  it('applies border declarations in order', () => {
+    const later = styleOf({ border: '1 solid red', 'border-left-color': 'blue' });
+    expect(later.borderColor).toEqual({ top: 'red', right: 'red', bottom: 'red', left: 'blue' });
+    const earlier = styleOf({ 'border-left-color': 'blue', border: '1 solid red' });
+    expect(earlier.borderColor.left).toBe('red');
+    const widths = styleOf({ border: '1 solid red', 'border-width': '4' });
+    expect(widths.borderWidth.top).toBe(4);
+    expect(widths.borderColor.top).toBe('red');
   });
 
   it('expands the flex shorthand', () => {
@@ -120,8 +154,15 @@ describe('resolveStyles', () => {
 
   it('resolves line-height from a multiplier or a length', () => {
     expect(styleOf({ 'line-height': '1.5' }).lineHeight).toBe(1.5);
-    expect(styleOf({ 'line-height': '14', 'font-size': '10' }).lineHeight).toBeCloseTo(1.4);
     expect(styleOf({ 'line-height': '14pt', 'font-size': '10' }).lineHeight).toBeCloseTo(1.4);
+    expect(styleOf({ 'line-height': '150%' }).lineHeight).toBe(1.5);
+    expect(styleOf({ 'line-height': '14', 'font-size': '10' }).lineHeight).toBe(14);
+    expect(styleOf({ 'line-height': '20px', 'font-size': '10' }).lineHeight).toBe(2);
+  });
+
+  it('does not divide by a zero font size', () => {
+    const style = styleOf({ 'line-height': '14pt', 'font-size': '0' });
+    expect(style.lineHeight).toBe(1.2);
   });
 
   it('inherits text properties from the nearest setting ancestor, not the rest', () => {

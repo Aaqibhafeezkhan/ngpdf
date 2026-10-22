@@ -64,7 +64,6 @@ export interface BorderParts {
 }
 
 export const MAX_NESTING = 64;
-const MAX_LINE_HEIGHT_MULTIPLIER = 4;
 
 export const ROOT_TEXT_STYLE: TextStyle = Object.freeze({
   color: '#000',
@@ -315,7 +314,7 @@ function defaultStyle(node: PdfNode, inherited: TextStyle): Mutable<ResolvedStyl
 
 /** Applies one declaration. Returns false for a property this engine does not know. */
 function apply(style: Mutable<ResolvedStyle>, property: string, value: string, tag: string): void {
-  const side = SIDES.find((s) => property.endsWith(`-${s}`));
+  const side = SIDES.find((s) => property.includes(`-${s}`));
   if (side && property.startsWith('margin-')) {
     style.margin = withSide(style.margin, side, parseLength(value, tag));
     return;
@@ -329,6 +328,14 @@ function apply(style: Mutable<ResolvedStyle>, property: string, value: string, t
     warnBorder(border);
     style.borderWidth = withSide(style.borderWidth, side, border.width);
     style.borderColor = withSide(style.borderColor, side, border.color);
+    return;
+  }
+  if (side && property === `border-${side}-width`) {
+    style.borderWidth = withSide(style.borderWidth, side, parsePoints(value, tag));
+    return;
+  }
+  if (side && property === `border-${side}-color`) {
+    style.borderColor = withSide(style.borderColor, side, value);
     return;
   }
   switch (property) {
@@ -430,6 +437,12 @@ function apply(style: Mutable<ResolvedStyle>, property: string, value: string, t
       style.borderColor = allSides(border.color);
       break;
     }
+    case 'border-width':
+      style.borderWidth = parseEdgeValues(value, (token) => parsePoints(token, tag), tag);
+      break;
+    case 'border-color':
+      style.borderColor = parseEdgeValues(value, (token) => token, tag);
+      break;
     case 'border-radius':
       style.borderRadius = parsePoints(value, tag);
       break;
@@ -464,6 +477,16 @@ function warnBorder(border: BorderParts): void {
   }
 }
 
+/** A bare number is a multiplier, N% is N/100, a length is divided by the font size. */
+function lineHeightOf(value: string, fontSize: number, tag: string): number {
+  const bare = parseNumber(value);
+  if (bare !== null) return bare;
+  const length = parseLength(value, tag);
+  if (length === 'auto') return fail(`invalid line-height "${show(value)}"`, tag);
+  if (typeof length !== 'number') return length.percent / 100;
+  return fontSize > 0 ? length / fontSize : ROOT_TEXT_STYLE.lineHeight;
+}
+
 function resolveOne(node: PdfNode, inherited: TextStyle): ResolvedStyle {
   const style = defaultStyle(node, inherited);
   let lineHeight: string | null = null;
@@ -473,13 +496,7 @@ function resolveOne(node: PdfNode, inherited: TextStyle): ResolvedStyle {
   }
   // Resolved last because a length depends on this element's own font size.
   if (lineHeight !== null && lineHeight !== 'normal') {
-    // A bare number up to 4 is a multiplier; a larger one is a length in points
-    // (`line-height: 14` on 10pt text is 1.4).
-    const bare = parseNumber(lineHeight);
-    style.lineHeight =
-      bare !== null && bare <= MAX_LINE_HEIGHT_MULTIPLIER
-        ? bare
-        : parsePoints(lineHeight, node.tag) / style.fontSize;
+    style.lineHeight = lineHeightOf(lineHeight, style.fontSize, node.tag);
   }
   return style;
 }
