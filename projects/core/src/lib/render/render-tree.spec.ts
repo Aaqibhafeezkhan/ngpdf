@@ -7,12 +7,13 @@ import {
   DestroyRef,
   EnvironmentInjector,
   InjectionToken,
+  type Type,
   LOCALE_ID,
   createEnvironmentInjector,
   inject,
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { PDF_ELEMENTS } from '../elements';
 import { elementChildren, propsOf, textContent, type PdfNode } from '../tree/node';
 import { renderTree } from './render-tree';
@@ -67,8 +68,34 @@ function at<T>(items: readonly T[], index: number): T {
   return item;
 }
 
+const FIXED_DATE = new Date(2020, 0, 2);
+
+@Component({
+  selector: 'pdf-test-dated',
+  imports: [PDF_ELEMENTS],
+  template: `<pdf-document [creationDate]="date" />`,
+})
+class DatedDocument {
+  readonly date = FIXED_DATE;
+}
+
 describe('renderTree', () => {
   let parent: EnvironmentInjector;
+  let rendered: { destroy(): void }[] = [];
+
+  const render = (
+    component: Type<unknown>,
+    injector: EnvironmentInjector = parent,
+  ): ReturnType<typeof renderTree> => {
+    const result = renderTree(component, injector);
+    rendered.push(result);
+    return result;
+  };
+
+  afterEach(() => {
+    for (const result of rendered) result.destroy();
+    rendered = [];
+  });
 
   beforeAll(async () => {
     parent = TestBed.inject(EnvironmentInjector);
@@ -76,7 +103,7 @@ describe('renderTree', () => {
   });
 
   it('builds document > page > table > rows with props', () => {
-    const result = renderTree(TestDocument, parent);
+    const result = render(TestDocument, parent);
     const documents = find(result.root, 'pdf-document');
     expect(documents).toHaveLength(1);
     const document = at(documents, 0);
@@ -90,22 +117,26 @@ describe('renderTree', () => {
     expect(rows.map((n) => n.tag)).toEqual(['pdf-row', 'pdf-row', 'pdf-row', 'pdf-row']);
     expect(propsOf(at(rows, 0))['header']).toBe(true);
     expect(propsOf(at(rows, 1))['header']).toBe(false);
-    result.destroy();
+  });
+
+  it('leaves creationDate undefined unless bound, and passes a bound Date through', () => {
+    const unbound = render(TestDocument);
+    expect(propsOf(at(find(unbound.root, 'pdf-document'), 0))['creationDate']).toBeUndefined();
+    const bound = render(DatedDocument);
+    expect(propsOf(at(find(bound.root, 'pdf-document'), 0))['creationDate']).toBe(FIXED_DATE);
   });
 
   it('applies static and bound styles', () => {
-    const result = renderTree(TestDocument, parent);
+    const result = render(TestDocument, parent);
     const rows = elementChildren(at(find(result.root, 'pdf-table'), 0));
     expect(at(rows, 1).rawStyle['background-color']).toBe('#ffffff');
     expect(at(rows, 2).rawStyle['background-color']).toBe('#f2f2f2');
     expect(at(rows, 1).rawStyle['padding']).toBe('6');
-    result.destroy();
   });
 
   it('formats dates through pipes with the component locale', () => {
-    const result = renderTree(TestDocument, parent);
+    const result = render(TestDocument, parent);
     expect(textContent(at(find(result.root, 'pdf-text'), 0))).toBe('22/10/2026');
-    result.destroy();
   });
 
   it('resolves services from the parent injector', () => {
@@ -113,14 +144,13 @@ describe('renderTree', () => {
       [{ provide: GREETING, useValue: 'hello' }],
       parent,
     );
-    const result = renderTree(TestDocument, withGreeting);
+    const result = render(TestDocument, withGreeting);
     expect(textContent(at(find(result.root, 'pdf-text'), 1))).toBe('hello');
-    result.destroy();
   });
 
   it('runs DestroyRef callbacks on destroy', () => {
     destroyed.length = 0;
-    const result = renderTree(TestDocument, parent);
+    const result = render(TestDocument, parent);
     expect(destroyed).toEqual([]);
     result.destroy();
     expect(destroyed).toEqual(['test-document']);

@@ -22,7 +22,7 @@ export class PdfDocument {
       author: this.author(),
       subject: this.subject(),
       keywords: this.keywords(),
-      creationDate: this.creationDate() ?? new Date(),
+      creationDate: this.creationDate(),
     };
   }
 }

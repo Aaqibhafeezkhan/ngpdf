@@ -22,7 +22,10 @@ export function renderTree<T>(
     parent,
   );
   const ref = createComponent(component, { environmentInjector });
+  let destroyed = false;
   const destroy = (): void => {
+    if (destroyed) return;
+    destroyed = true;
     ref.destroy();
     environmentInjector.destroy();
   };
