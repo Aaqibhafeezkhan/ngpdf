@@ -187,8 +187,8 @@ describe('layoutBox', () => {
     expect([box.w, box.h, box.image]).toEqual([100, 30, asset]);
   });
 
-  it('ignores non-element children', () => {
-    const root = el('pdf-view', {}, [textNode('stray'), el('pdf-view', { height: '5' })]);
+  it('ignores comment children', () => {
+    const root = el('pdf-view', {}, [createNode('comment'), el('pdf-view', { height: '5' })]);
     expect(lay(root, 50).children).toHaveLength(1);
   });
 });
@@ -470,3 +470,54 @@ function place(
   const child = box.children[0];
   return [child?.x ?? NaN, child?.w ?? NaN, child?.h ?? NaN];
 }
+
+describe('anonymous text', () => {
+  const linesOf = (box: Box | undefined): string[] =>
+    box?.text?.lines.map((line) => line.text) ?? [];
+
+  it('lays out bare text in a cell as a text box', () => {
+    const cell = el('pdf-cell', {}, [textNode(' x ')]);
+    const root = table([100], [[cell]]);
+    const laidCell = lay(root, 100).children[0]?.children[0];
+    expect(laidCell?.children).toHaveLength(1);
+    expect(linesOf(laidCell?.children[0])).toEqual(['x']);
+    expect(laidCell?.children[0]?.h).toBeCloseTo(12, 5);
+  });
+
+  it('keeps text runs and elements in order, each run its own box with the parent text style', () => {
+    const view = el('pdf-view', { 'font-size': '20', padding: '3' }, [
+      textNode('a'),
+      el('pdf-text', {}, [textNode('b')]),
+      textNode('c'),
+    ]);
+    const box = lay(view, 200);
+    expect(box.children.map(linesOf)).toEqual([['a'], ['b'], ['c']]);
+    const [first, , last] = box.children;
+    expect(first?.style.fontSize).toBe(20);
+    // Only the text styles are inherited: the anonymous box has no padding of its own.
+    expect(first?.padding.top).toBe(0);
+    expect(first?.y).toBe(3);
+    expect(last?.y).toBeCloseTo(3 + 2 * 24, 5);
+  });
+
+  it('adds no box for whitespace between elements and joins a run across comments', () => {
+    const view = el('pdf-view', {}, [
+      textNode(' \n\t '),
+      el('pdf-text', {}, [textNode('b')]),
+      textNode('  '),
+      textNode('d'),
+      createNode('comment'),
+      textNode('e'),
+    ]);
+    expect(lay(view, 200).children.map(linesOf)).toEqual([['b'], ['de']]);
+  });
+
+  it('leaves the text of pdf-text, pdf-image and pdf-page-number alone', () => {
+    const view = el('pdf-view', {}, [
+      el('pdf-text', {}, [textNode('t')]),
+      el('pdf-page-number', {}, [textNode('n')]),
+    ]);
+    const box = lay(view, 200);
+    expect(box.children.map((child) => child.children.length)).toEqual([0, 0]);
+  });
+});

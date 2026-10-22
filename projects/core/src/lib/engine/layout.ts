@@ -1,8 +1,8 @@
 import type { Edge, Node as YogaNode, Yoga } from 'yoga-layout/load';
-import { elementChildren, propsOf, textContent, type PdfNode } from '../tree/node';
+import { createNode, propsOf, textContent, type PdfNode } from '../tree/node';
 import type { TableColumn } from '../tree/table-column';
 import type { ImageAsset } from './images';
-import type { Edges, Length, ResolvedStyle } from './style';
+import { anonymousTextStyle, type Edges, type Length, type ResolvedStyle } from './style';
 import { layoutText, measureText, type TextBlock } from './text';
 import type { FontMetrics } from './writer';
 
@@ -202,6 +202,36 @@ function sizeImage(
   }
 }
 
+// Elements whose text is their own content (or that hold none), never wrapped in anonymous boxes.
+const LEAVES = new Set(['pdf-text', 'pdf-image', 'pdf-page-number']);
+
+/**
+ * The children of `node` as boxes: its elements, and each maximal run of text nodes between them
+ * (comments skipped) as an anonymous pdf-text, like CSS's anonymous block boxes. A run that is
+ * only whitespace gives nothing. The anonymous node points at `node` as its parent but `node` and
+ * the text nodes are left unchanged.
+ */
+function boxChildren(node: PdfNode): PdfNode[] {
+  const out: PdfNode[] = [];
+  let run: PdfNode[] = [];
+  const close = (): void => {
+    if (run.some((child) => /[^ \t\r\n]/.test(child.text))) {
+      out.push({ ...createNode('element', 'pdf-text'), parent: node, children: run });
+    }
+    run = [];
+  };
+  for (const child of node.children) {
+    if (child.kind === 'element') {
+      close();
+      out.push(child);
+    } else if (child.kind === 'text' && !LEAVES.has(node.tag)) {
+      run.push(child);
+    }
+  }
+  close();
+  return out;
+}
+
 const zeroEdge: Length = 0;
 
 function isZero(length: Length): boolean {
@@ -272,6 +302,8 @@ export function layoutBox(
   const created: YogaNode[] = [];
   const ignored = new Set<string>();
   const effective = new Map<PdfNode, ResolvedStyle>();
+  // Built once per node, so anonymous text keeps its identity (and measure cache) across passes.
+  const childrenOf = new Map<PdfNode, PdfNode[]>();
 
   const styleFor = (current: PdfNode): ResolvedStyle => {
     let style = effective.get(current);
@@ -351,7 +383,17 @@ export function layoutBox(
     // Row children are cells; each row restarts the column counter.
     const counter = current.tag === 'pdf-row' ? { next: 0 } : spanStart;
     let index = 0;
-    for (const child of elementChildren(current)) {
+    let children = childrenOf.get(current);
+    if (!children) {
+      children = boxChildren(current);
+      for (const child of children) {
+        if (!styles.has(child)) {
+          effective.set(child, anonymousTextStyle(style));
+        }
+      }
+      childrenOf.set(current, children);
+    }
+    for (const child of children) {
       const isTableRow = current.tag === 'pdf-table';
       const nodeColumns =
         current.tag === 'pdf-table' || current.tag === 'pdf-row' ? childColumns : null;

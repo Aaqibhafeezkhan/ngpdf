@@ -1,4 +1,4 @@
-import { propsOf, type PdfNode } from '../tree/node';
+import { createNode, propsOf, type PdfNode } from '../tree/node';
 
 export type Length = number | { readonly percent: number } | 'auto';
 
@@ -512,6 +512,14 @@ function textPartOf(style: ResolvedStyle): TextStyle {
     textAlign: style.textAlign,
     textDecoration: style.textDecoration,
   };
+}
+
+/**
+ * The style of an anonymous text box (bare text inside an element other than pdf-text): the
+ * parent's text styles and the defaults for everything else, as CSS gives an anonymous block.
+ */
+export function anonymousTextStyle(parent: ResolvedStyle): ResolvedStyle {
+  return defaultStyle(createNode('element', 'pdf-text'), textPartOf(parent));
 }
 
 interface Pending {

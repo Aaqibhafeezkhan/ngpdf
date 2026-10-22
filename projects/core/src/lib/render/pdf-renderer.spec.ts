@@ -57,6 +57,26 @@ class TestDocument {
 }
 
 @Component({
+  selector: 'pdf-bare-text-document',
+  imports: [PDF_ELEMENTS],
+  template: `
+    <pdf-document>
+      <pdf-page>
+        <pdf-table [columns]="['1fr']">
+          <pdf-row>
+            <pdf-cell>{{ cell() }}</pdf-cell>
+          </pdf-row>
+        </pdf-table>
+        <pdf-view>a<pdf-text>b</pdf-text>c</pdf-view>
+      </pdf-page>
+    </pdf-document>
+  `,
+})
+class BareTextDocument {
+  readonly cell = input('');
+}
+
+@Component({
   selector: 'pdf-no-document',
   imports: [PDF_ELEMENTS],
   template: '<pdf-page />',
@@ -99,6 +119,13 @@ describe('PdfRenderer', () => {
     });
     expect(blob.type).toBe('application/pdf');
     expect(await shownText(blob)).toEqual(['Alpha row', 'Beta row']);
+  });
+
+  it('draws bare text in elements other than pdf-text as anonymous text boxes', async () => {
+    const blob = await TestBed.inject(PdfRenderer).toBlob(BareTextDocument, {
+      inputs: { cell: 'In a cell' },
+    });
+    expect(await shownText(blob)).toEqual(['In a cell', 'a', 'b', 'c']);
   });
 
   it('renders without inputs', async () => {
