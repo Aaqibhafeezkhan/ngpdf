@@ -90,6 +90,20 @@ jobs:
           scan-args: |-
             --lockfile=package-lock.json
 
+  bundle-budget:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # Builds the demo and fails above 15 KB gzipped of @ngpdf/core in the initial chunks.
+      - run: node scripts/bundle-budget.mjs
+
   build:
     runs-on: ubuntu-24.04
     steps:

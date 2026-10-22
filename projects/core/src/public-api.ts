@@ -1,2 +1,22 @@
-// Public API surface of @ngpdf/core. Later tasks add the exports.
-export {};
+// Public API surface of @ngpdf/core. The engine is not exported: it loads on the first render.
+export {
+  PDF_ELEMENTS,
+  PdfCell,
+  PdfDocument,
+  PdfImage,
+  PdfPage,
+  PdfPageNumber,
+  PdfRow,
+  PdfTable,
+  PdfText,
+  PdfView,
+} from './lib/elements';
+export type { TableColumn } from './lib/elements';
+export type { PageOrientation, PageSize } from './lib/elements/page';
+export { PdfRenderer, downloadPdf, renderToBlob } from './lib/render/pdf-renderer';
+export type {
+  DownloadOptions,
+  DownloadPdfOptions,
+  RenderOptions,
+  RenderToBlobOptions,
+} from './lib/render/pdf-renderer';

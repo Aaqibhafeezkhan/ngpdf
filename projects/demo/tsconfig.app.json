@@ -3,8 +3,9 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "types": []
+    "types": [],
+    "paths": { "@ngpdf/core": ["../core/src/public-api.ts"] }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "../core/src/**/*.d.ts"],
   "exclude": ["src/**/*.spec.ts"]
 }

@@ -1,3 +1,8 @@
+// ng-packagr compiles from the entry point, so the ambient module declarations are named here.
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="./pdfkit-standalone.d.ts" />
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="./linebreak.d.ts" />
 import { elementChildren, propsOf, type PdfNode } from '../tree/node';
 import { displayList } from './display-list';
 import { loadImages } from './images';

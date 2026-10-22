@@ -44,6 +44,7 @@
                 "input": "projects/demo/public"
               }
             ],
+            "allowedCommonJsDependencies": ["pdfkit", "unicode-trie", "base64-js"],
             "styles": ["projects/demo/src/styles.css"]
           },
           "configurations": {

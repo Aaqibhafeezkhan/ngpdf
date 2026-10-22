@@ -124,6 +124,14 @@ export default tseslint.config(
           ],
         },
       ],
+      // The rule above does not see import(): a lazy pdfkit or Yoga load stays in the two files.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'ImportExpression[source.value=/pdfkit|yoga-layout/]',
+          message: 'Only engine/writer.ts and engine/index.ts import pdfkit and yoga-layout.',
+        },
+      ],
     },
   },
   {
@@ -132,10 +140,12 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
-    files: ['**/*.spec.ts'],
+    files: ['**/*.spec.ts', '**/*.bench.ts'],
     rules: {
       // Specs poke at internals and use non-null assertions on fixtures.
       '@typescript-eslint/no-non-null-assertion': 'off',
+      // Fixtures load Yoga and pdfkit to build real layouts.
+      'no-restricted-syntax': 'off',
     },
   },
   prettier,
