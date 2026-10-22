@@ -223,6 +223,24 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
 
 type Doc = InstanceType<Awaited<typeof import('pdfkit/js/pdfkit.standalone.js')>['default']>;
 
+/**
+ * pdfkit options that draw `op.text` as the one line the layout made of it. Any `width` turns on
+ * pdfkit's own line wrapper, which sums the words measured one by one; that sum leaves out the
+ * kerning across a space (Helvetica kerns " V" and " T" by -50/1000 em), comes out wider than the
+ * line and wraps its last word below it. Without `width`, the decorations read the line's width
+ * from `textWidth` (and `wordCount`, for word spacing), which the wrapper would otherwise set.
+ */
+function singleLine(op: Extract<DrawOp, { op: 'text' }>, width: number): PDFKit.Mixins.TextOptions {
+  const options = {
+    lineBreak: false,
+    underline: op.underline,
+    strike: op.strike,
+    textWidth: width,
+    wordCount: 1,
+  };
+  return options;
+}
+
 function drawOp(doc: Doc, op: DrawOp, dataUrls: WeakMap<Uint8Array, string>): void {
   switch (op.op) {
     case 'rect':
@@ -242,13 +260,7 @@ function drawOp(doc: Doc, op: DrawOp, dataUrls: WeakMap<Uint8Array, string>): vo
     case 'text':
       doc.save();
       doc.font(op.font).fontSize(op.size).fillColor(op.color, op.opacity);
-      doc.text(op.text, op.x, op.y, {
-        // Decorations need an explicit width when line breaking is off.
-        width: doc.widthOfString(op.text),
-        lineBreak: false,
-        underline: op.underline,
-        strike: op.strike,
-      });
+      doc.text(op.text, op.x, op.y, singleLine(op, doc.widthOfString(op.text)));
       doc.restore();
       return;
     case 'image': {

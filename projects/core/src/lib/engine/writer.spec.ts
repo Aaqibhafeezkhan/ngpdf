@@ -313,6 +313,20 @@ describe('createPdfkitWriter', () => {
       expect(count(content, /^q$/gm)).toBe(count(content, /^Q$/gm));
     });
 
+    it('draws a text op as one line, also when kerning narrows it across a space', async () => {
+      // ' V' kerns by -50/1000 em, so pdfkit's word-by-word sum is 0.45pt over the line's width.
+      const line = 'Clínica Bem Viver';
+      const width = writer.widthOf(line, 'Helvetica', 9);
+      const content = contentOf(
+        await pdfText([{ ...TEXT_OP, text: line, size: 9, opacity: 1, strike: false }]),
+      );
+      expect(count(content, /^BT$/gm)).toBe(1);
+      const strokes = [...content.matchAll(/^([\d.]+) [\d.]+ m\n([\d.]+) [\d.]+ l$/gm)];
+      expect(strokes).toHaveLength(1);
+      const [, from, to] = strokes[0] as RegExpMatchArray;
+      expect(Number(to) - Number(from)).toBeCloseTo(width, 3);
+    });
+
     it('strokes underline and strike at the text opacity', async () => {
       const pdf = await pdfText([TEXT_OP]);
       expect(pdf).toMatch(/\/CA 0\.4\b/);

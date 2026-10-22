@@ -157,6 +157,44 @@ describe('renderDocument', () => {
     }
   });
 
+  it('writes each name of a table cell on one line, as laid out (licences list geometry)', async () => {
+    // A4 landscape, padding 36, 9pt Helvetica, cells padded 4: the 3fr column is 255.9pt wide
+    // inside. Each name kerns across a space (" V", " T") and fits on one line.
+    const names = ['Padaria Trigo Dourado Ltda', 'Clínica Bem Viver', 'Mercearia Vila Nova'];
+    const cell = (content: string): PdfNode =>
+      el('pdf-cell', { 'padding-left': '4', 'padding-right': '4' }, [text(content)]);
+    const rows = names.map((name, i) =>
+      el('pdf-row', { 'padding-top': '4', 'padding-bottom': '4' }, [
+        cell(String(i + 1)),
+        cell('Agenda Integrada'),
+        cell(name),
+        ...['10/04/2025', '10/04/2026', 'NF-2026039', 'R$ 1.621,03'].map(cell),
+      ]),
+    );
+    const table = el('pdf-table', {}, rows, { columns: [30, '2fr', '3fr', 70, 70, 80, 80] });
+    const page = el('pdf-page', { padding: '36', 'font-size': '9' }, [table], {
+      size: 'A4',
+      orientation: 'landscape',
+    });
+    const pdfkit = await createPdfkitWriter({ compress: false });
+    let drawn: PageOps[] = [];
+    const writer: PdfWriter = {
+      ...recordingWriter(),
+      write: (pages, info) => {
+        drawn = [...pages];
+        return pdfkit.write(pages, info);
+      },
+    };
+    const body = await bytesOf(
+      await renderDocument(host({ creationDate: new Date(0) }, [page]), { writer, dev: false }),
+    );
+    const texts = drawn.flatMap((p) => p.ops).filter((op) => op.op === 'text');
+    for (const name of names) expect(texts.map((op) => op.text)).toContain(name);
+    expect(texts).toHaveLength(names.length * 7);
+    // One text object per text op: pdfkit wrapped nothing on its own.
+    expect(body.match(/^BT$/gm)).toHaveLength(texts.length);
+  });
+
   it('gives the same bytes for the same tree and a fixed creationDate', async () => {
     const render = async (): Promise<string> => {
       const writer = await createPdfkitWriter({ compress: false });
