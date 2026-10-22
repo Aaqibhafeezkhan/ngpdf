@@ -1,9 +1,10 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Yoga } from 'yoga-layout/load';
 import { createNode, type PdfNode } from '../tree/node';
 import type { TableColumn } from '../tree/table-column';
 import { layoutBox, resolveColumns, type Box, type LayoutContext } from './layout';
 import { resolveStyles } from './style';
+import * as textModule from './text';
 import { createPdfkitWriter, type PdfWriter } from './writer';
 
 let yoga: Yoga;
@@ -34,8 +35,13 @@ function textNode(content: string): PdfNode {
   return createNode('text', '', content);
 }
 
-function lay(root: PdfNode, width: number): Box {
-  const ctx: LayoutContext = { yoga, metrics: writer, images: new Map() };
+function lay(root: PdfNode, width: number, warn?: (message: string) => void): Box {
+  const ctx: LayoutContext = {
+    yoga,
+    metrics: writer,
+    images: new Map(),
+    ...(warn ? { warn } : {}),
+  };
   return layoutBox(root, resolveStyles(root), width, ctx);
 }
 
@@ -210,7 +216,10 @@ describe('tables', () => {
     const root = table(['1fr', '1fr'], [cells([1, 1])]);
     root.rawStyle = { padding: '10' };
     const row = lay(root, 120).children[0];
-    expect(row?.children.map((cell) => cell.w)).toEqual([50, 50]);
+    expect(row?.children.map((cell) => [cell.x, cell.w])).toEqual([
+      [0, 50],
+      [50, 50],
+    ]);
   });
 
   it('resolves nested tables against their own width', () => {
@@ -222,5 +231,148 @@ describe('tables', () => {
 
   it('lays out a table without rows', () => {
     expect(() => lay(table([], []), 100)).not.toThrow();
+  });
+});
+
+describe('table box model', () => {
+  const styledRow = (style: Record<string, string>): PdfNode => el('pdf-row', style, cells([1, 1]));
+  const tableOf = (rows: PdfNode[]): PdfNode => el('pdf-table', {}, rows, { columns: [60, '1fr'] });
+
+  it('keeps cells on their columns whatever the row padding, borders and margin', () => {
+    const root = tableOf([
+      styledRow({ padding: '6', 'border-left': '3 solid #000', 'border-right': '1 solid #000' }),
+      styledRow({ margin: '5', 'justify-content': 'flex-end', 'flex-direction': 'column' }),
+      styledRow({}),
+    ]);
+    const warnings: string[] = [];
+    const box = lay(root, 200, (message) => warnings.push(message));
+    for (const row of box.children) {
+      expect(row.children.map((cell) => [cell.x, cell.w])).toEqual([
+        [0, 60],
+        [60, 140],
+      ]);
+    }
+    expect(box.children[0]?.x).toBe(0);
+    // Vertical padding stays: 6 + 10 + 6.
+    expect(box.children[0]?.h).toBe(22);
+    expect(box.children[0]?.style.borderWidth.left).toBe(0);
+  });
+
+  it('warns once per layout, naming each ignored property', () => {
+    const root = tableOf([
+      styledRow({ padding: '6', 'border-left': '3 solid #000' }),
+      styledRow({ padding: '6' }),
+      el('pdf-row', {}, [
+        el('pdf-cell', { margin: '4', 'min-width': '10', 'max-width': '20' }, [], { span: 1 }),
+      ]),
+    ]);
+    const warn = vi.fn();
+    lay(root, 200, warn);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = String(warn.mock.calls[0]?.[0]);
+    for (const name of [
+      'pdf-row padding-left',
+      'pdf-row padding-right',
+      'pdf-row border-left',
+      'pdf-cell margin',
+      'pdf-cell min-width',
+      'pdf-cell max-width',
+    ]) {
+      expect(message).toContain(name);
+    }
+  });
+
+  it('does not warn for an untouched table', () => {
+    const warn = vi.fn();
+    lay(tableOf([styledRow({})]), 200, warn);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('warns for margin, justify-content and flex-direction on a row', () => {
+    const warn = vi.fn();
+    lay(
+      tableOf([
+        styledRow({ margin: '5', 'justify-content': 'center', 'flex-direction': 'column' }),
+      ]),
+      200,
+      warn,
+    );
+    const message = String(warn.mock.calls[0]?.[0]);
+    expect(message).toContain('pdf-row margin');
+    expect(message).toContain('pdf-row justify-content');
+    expect(message).toContain('pdf-row flex-direction');
+  });
+});
+
+describe('passes and cleanup', () => {
+  it('lays a table in a shrink-to-fit parent out deterministically', () => {
+    const build = (): PdfNode =>
+      el('pdf-view', { 'align-items': 'flex-start' }, [
+        table(
+          [40, '1fr'],
+          [[...cells([1]), el('pdf-cell', {}, [el('pdf-text', {}, [textNode('some text')])])]],
+        ),
+      ]);
+    const warn = vi.fn();
+    const first = lay(build(), 300, warn);
+    const second = lay(build(), 300);
+    const widths = (box: Box): number[] =>
+      (box.children[0]?.children[0]?.children ?? []).map((cell) => cell.w);
+    expect(widths(first)).toEqual(widths(second));
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('wraps each text node once per call, however many passes run', () => {
+    const spy = vi.spyOn(textModule, 'layoutText');
+    const text = el('pdf-text', {}, [textNode('some text in a cell')]);
+    const root = table([100, '1fr'], [[el('pdf-cell', {}, [text]), ...cells([1])]]);
+    spy.mockClear();
+    lay(root, 300);
+    const wraps = spy.mock.calls.filter(([content]) => content === 'some text in a cell');
+    spy.mockRestore();
+    expect(wraps).toHaveLength(1);
+  });
+
+  it('uses the last pass and warns when the table widths never settle', () => {
+    // The column is 99% of a table that is as wide as its own column.
+    const root = el('pdf-view', { 'align-items': 'flex-start' }, [
+      table(['99%'], [[el('pdf-cell', {}, [el('pdf-view', { width: '100' })])]]),
+    ]);
+    const warn = vi.fn();
+    const box = lay(root, 300, warn);
+    expect(warn).toHaveBeenCalledWith('ngpdf: table columns did not settle');
+    expect(box.children).toHaveLength(1);
+  });
+
+  it('frees every Yoga node when a build fails halfway', () => {
+    const live = new Set<unknown>();
+    const tracked = {
+      ...yoga,
+      Node: {
+        ...yoga.Node,
+        create: (config?: Parameters<typeof yoga.Node.create>[0]) => {
+          const node = yoga.Node.create(config);
+          live.add(node);
+          const free = node.free.bind(node);
+          node.free = () => {
+            live.delete(node);
+            free();
+          };
+          return node;
+        },
+      },
+    } as unknown as Yoga;
+    const huge = 'x'.repeat(1_048_577);
+    const root = el('pdf-view', {}, [
+      el('pdf-view', {}, [el('pdf-view', {}), el('pdf-text', {}, [textNode(huge)])]),
+    ]);
+    expect(() =>
+      layoutBox(root, resolveStyles(root), 100, {
+        yoga: tracked,
+        metrics: writer,
+        images: new Map(),
+      }),
+    ).toThrow(/^ngpdf:/);
+    expect(live.size).toBe(0);
   });
 });

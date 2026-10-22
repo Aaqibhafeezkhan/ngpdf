@@ -1,4 +1,4 @@
-import type { Config, Edge, Node as YogaNode, Yoga } from 'yoga-layout/load';
+import type { Edge, Node as YogaNode, Yoga } from 'yoga-layout/load';
 import { elementChildren, propsOf, textContent, type PdfNode } from '../tree/node';
 import type { TableColumn } from '../tree/table-column';
 import type { ImageAsset } from './images';
@@ -23,6 +23,11 @@ export interface LayoutContext {
   readonly yoga: Yoga;
   readonly metrics: FontMetrics;
   readonly images: ReadonlyMap<PdfNode, ImageAsset>;
+  /**
+   * Dev-mode warnings (ignored table styles, table columns that did not settle), at most one of
+   * each kind per `layoutBox` call. The caller decides where they go.
+   */
+  readonly warn?: (message: string) => void;
 }
 
 type Measure = (width: number, widthMode: number) => { width: number; height: number };
@@ -145,6 +150,57 @@ function styleOf(styles: ReadonlyMap<PdfNode, ResolvedStyle>, node: PdfNode): Re
   return style;
 }
 
+const zeroEdge: Length = 0;
+
+function isZero(length: Length): boolean {
+  return length === 0;
+}
+
+/**
+ * Inside a table, rows and cells give up the styles that would move cells off their columns:
+ * a row keeps vertical padding and borders and its background, but its horizontal padding,
+ * left/right border, margin, justify-content and direction are fixed; a cell loses its margin
+ * and min/max width. `ignored` collects the properties the author had set.
+ */
+function tableStyle(style: ResolvedStyle, node: PdfNode, ignored: Set<string>): ResolvedStyle {
+  const parent = node.parent;
+  if (node.tag === 'pdf-row' && parent?.tag === 'pdf-table') {
+    const { padding, borderWidth, margin } = style;
+    if (!isZero(padding.left)) ignored.add('pdf-row padding-left');
+    if (!isZero(padding.right)) ignored.add('pdf-row padding-right');
+    if (borderWidth.left !== 0) ignored.add('pdf-row border-left');
+    if (borderWidth.right !== 0) ignored.add('pdf-row border-right');
+    if (Object.values(margin).some((side) => !isZero(side as Length))) {
+      ignored.add('pdf-row margin');
+    }
+    if (style.justifyContent !== 'flex-start') ignored.add('pdf-row justify-content');
+    if (style.flexDirection !== 'row') ignored.add('pdf-row flex-direction');
+    return {
+      ...style,
+      flexDirection: 'row',
+      justifyContent: 'flex-start',
+      gap: 0,
+      margin: { top: zeroEdge, right: zeroEdge, bottom: zeroEdge, left: zeroEdge },
+      padding: { ...padding, left: zeroEdge, right: zeroEdge },
+      borderWidth: { ...borderWidth, left: 0, right: 0 },
+    };
+  }
+  if (node.tag === 'pdf-cell' && parent?.tag === 'pdf-row' && parent.parent?.tag === 'pdf-table') {
+    if (Object.values(style.margin).some((side) => !isZero(side as Length))) {
+      ignored.add('pdf-cell margin');
+    }
+    if (style.minWidth !== 'auto') ignored.add('pdf-cell min-width');
+    if (style.maxWidth !== 'auto') ignored.add('pdf-cell max-width');
+    return {
+      ...style,
+      margin: { top: zeroEdge, right: zeroEdge, bottom: zeroEdge, left: zeroEdge },
+      minWidth: 'auto',
+      maxWidth: 'auto',
+    };
+  }
+  return style;
+}
+
 /**
  * Lays `node` out in `width` points with unbounded height. Positions are relative to the parent
  * box. Yoga runs with a point scale factor of 0, so nothing is rounded to a pixel grid and a
@@ -161,6 +217,18 @@ export function layoutBox(
   const config = yoga.Config.create();
   config.setPointScaleFactor(0);
   const measures = new Map<PdfNode, Measure>();
+  const created: YogaNode[] = [];
+  const ignored = new Set<string>();
+  const effective = new Map<PdfNode, ResolvedStyle>();
+
+  const styleFor = (current: PdfNode): ResolvedStyle => {
+    let style = effective.get(current);
+    if (!style) {
+      style = tableStyle(styleOf(styles, current), current, ignored);
+      effective.set(current, style);
+    }
+    return style;
+  };
 
   const measureOf = (textNode: PdfNode, style: ResolvedStyle): Measure => {
     let measure = measures.get(textNode);
@@ -188,8 +256,9 @@ export function layoutBox(
     columns: readonly number[] | null,
     spanStart: { next: number },
   ): Built => {
-    const style = styleOf(styles, current);
+    const style = styleFor(current);
     const yogaNode = yoga.Node.create(config);
+    created.push(yogaNode);
     applyStyle(yoga, yogaNode, style);
     const isText = current.tag === 'pdf-text';
     const built: Built = { node: current, yoga: yogaNode, children: [], isText };
@@ -205,8 +274,6 @@ export function layoutBox(
       const declared = (propsOf(current)['columns'] ?? []) as TableColumn[];
       childColumns = known === undefined ? null : resolveColumns(declared, known);
     } else if (current.tag === 'pdf-row' && columns) {
-      // Cells carry the alignment, so a gap would shift them off their columns.
-      yogaNode.setGap(yoga.GUTTER_ALL, 0);
       childColumns = columns;
     } else if (current.tag === 'pdf-cell' && columns) {
       const span = Math.max(1, Math.floor(Number(propsOf(current)['span'] ?? 1)) || 1);
@@ -233,47 +300,68 @@ export function layoutBox(
     return built;
   };
 
-  const read = (built: Built, found: Map<PdfNode, number>): Box => {
-    const { node: current, yoga: yogaNode } = built;
-    const style = styleOf(styles, current);
-    const w = yogaNode.getComputedWidth();
-    const insetX = (edge: Edge): number =>
+  const collectTableWidths = (built: Built, found: Map<PdfNode, number>): void => {
+    if (built.node.tag === 'pdf-table') found.set(built.node, contentWidthOf(built.yoga));
+    for (const child of built.children) collectTableWidths(child, found);
+  };
+
+  const contentWidthOf = (yogaNode: YogaNode): number => {
+    const inset = (edge: Edge): number =>
       yogaNode.getComputedPadding(edge) + yogaNode.getComputedBorder(edge);
-    const contentWidth = w - insetX(yoga.EDGE_LEFT) - insetX(yoga.EDGE_RIGHT);
-    if (current.tag === 'pdf-table') found.set(current, contentWidth);
+    return yogaNode.getComputedWidth() - inset(yoga.EDGE_LEFT) - inset(yoga.EDGE_RIGHT);
+  };
+
+  // Only the final pass reads boxes, so text is wrapped once per node.
+  const read = (built: Built): Box => {
+    const { node: current, yoga: yogaNode } = built;
+    const style = styleFor(current);
     const image = ctx.images.get(current);
     return {
       node: current,
       style,
       x: yogaNode.getComputedLeft(),
       y: yogaNode.getComputedTop(),
-      w,
+      w: yogaNode.getComputedWidth(),
       h: yogaNode.getComputedHeight(),
       ...(built.isText
-        ? { text: layoutText(textContent(current), style, contentWidth, ctx.metrics) }
+        ? {
+            text: layoutText(textContent(current), style, contentWidthOf(yogaNode), ctx.metrics),
+          }
         : {}),
       ...(image ? { image } : {}),
-      children: built.children.map((child) => read(child, found)),
+      children: built.children.map(read),
     };
   };
 
-  return run(config, () => {
+  try {
     let known: TableWidths = new Map();
     for (let pass = 1; ; pass++) {
       const root = build(node, known, null, { next: 0 });
       root.yoga.setWidth(width);
       root.yoga.calculateLayout(width, undefined, yoga.DIRECTION_LTR);
       const found = new Map<PdfNode, number>();
-      let box: Box;
-      try {
-        box = read(root, found);
-      } finally {
-        root.yoga.freeRecursive();
+      collectTableWidths(root, found);
+      const settled = sameWidths(known, found);
+      if (settled || pass === MAX_PASSES) {
+        if (!settled) ctx.warn?.('ngpdf: table columns did not settle');
+        const box = read(root);
+        if (ignored.size > 0) {
+          ctx.warn?.(`ngpdf: ignored inside tables: ${[...ignored].join(', ')}`);
+        }
+        return box;
       }
-      if (pass === MAX_PASSES || sameWidths(known, found)) return box;
       known = found;
+      freeAll(created);
     }
-  });
+  } finally {
+    freeAll(created);
+    config.free();
+  }
+}
+
+/** Frees every node created so far, also those a failed build never attached. */
+function freeAll(nodes: YogaNode[]): void {
+  for (const created of nodes.splice(0)) created.free();
 }
 
 function sameWidths(a: TableWidths, b: TableWidths): boolean {
@@ -283,13 +371,4 @@ function sameWidths(a: TableWidths, b: TableWidths): boolean {
     if (other === undefined || Math.abs(other - value) > WIDTH_EPSILON) return false;
   }
   return true;
-}
-
-/** Frees the shared config after `work`, also when it throws. */
-function run<T>(config: Config, work: () => T): T {
-  try {
-    return work();
-  } finally {
-    config.free();
-  }
 }
