@@ -74,11 +74,20 @@ describe('loadImages', () => {
     expect(assets.get(node)?.width).toBe(200);
   });
 
-  it('keeps a stray percent sign and rejects a data URL without a comma', async () => {
+  it('rejects a data URL without a comma', async () => {
     const bad = imageNode('data:image/png;base64');
     await expect(loadImages(root(bad), writer)).rejects.toThrow(/malformed data URL/);
-    const stray = imageNode('data:image/png,%zz');
-    await expect(loadImages(root(stray), writer)).rejects.toThrow(/could not load image/);
+  });
+
+  it('keeps a literal percent byte that is not an escape', async () => {
+    // Width 37 is 0x25, the byte for '%'; it is written as a bare '%' followed by an escape.
+    const bytes = pngHeader(37, 100);
+    const encoded = Array.from(bytes, (b) =>
+      b === 0x25 ? '%' : `%${b.toString(16).padStart(2, '0')}`,
+    ).join('');
+    const node = imageNode(`data:image/png,${encoded}`);
+    const assets = await loadImages(root(node), writer);
+    expect(assets.get(node)).toEqual({ data: bytes, width: 37, height: 100 });
   });
 
   it('loads a Blob and an ArrayBuffer the same way', async () => {
@@ -107,6 +116,28 @@ describe('loadImages', () => {
       globalThis.fetch = original;
     }
     expect(stub).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts every fetch before any resolves', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const fetchFn = vi.fn(async () => {
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return new Response(png as BodyInit);
+    });
+    await loadImages(root(imageNode('/a.png'), imageNode('/b.png')), writer, fetchFn);
+    expect(peak).toBe(2);
+  });
+
+  it('fetches a repeated URL once', async () => {
+    const fetchFn = vi.fn(() => Promise.resolve(new Response(png as BodyInit)));
+    const first = imageNode('/same.png');
+    const second = imageNode('/same.png');
+    const assets = await loadImages(root(first, second), writer, fetchFn);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(assets.get(second)).toBe(assets.get(first));
   });
 
   it('rejects a 404 with the URL and the status', async () => {

@@ -154,18 +154,33 @@ function styleOf(styles: ReadonlyMap<PdfNode, ResolvedStyle>, node: PdfNode): Re
  * An image with one dimension set follows the aspect ratio for the other; with none set it
  * takes its natural size (1 pixel = 1pt), capped to the available width.
  */
-function sizeImage(node: YogaNode, style: ResolvedStyle, asset: ImageAsset, yoga: Yoga): void {
-  const ratio = asset.width / asset.height;
+function sizeImage(
+  node: YogaNode,
+  style: ResolvedStyle,
+  asset: ImageAsset,
+  yoga: Yoga,
+  parent: ResolvedStyle | undefined,
+): void {
   const { width, height } = style;
+  if (!(asset.width > 0 && asset.height > 0)) {
+    // No usable ratio: the image takes its style size, or nothing.
+    if (width === 'auto') node.setWidth(0);
+    if (height === 'auto') node.setHeight(0);
+    return;
+  }
+  const ratio = asset.width / asset.height;
   if (width === 'auto' && height === 'auto') {
-    // Measured, so the width can be capped while the height follows it. A stretching parent
-    // would widen the image to the parent, so it is aligned to the start instead.
-    if (style.alignSelf === 'auto' || style.alignSelf === 'stretch') {
-      node.setAlignSelf(yoga.ALIGN_FLEX_START);
+    // Measured, so the width can be capped while the height follows it. A column parent that
+    // stretches its children would widen the image to the parent, so only that case (neither the
+    // image nor the parent asks for another alignment) is moved to the start. An explicit
+    // `align-self: stretch` is kept: the image fills the width and its height follows the ratio.
+    if (style.alignSelf === 'auto' && parent?.flexDirection === 'column') {
+      if (parent.alignItems === 'stretch') node.setAlignSelf(yoga.ALIGN_FLEX_START);
     }
     node.setMeasureFunc((available, mode) => {
-      const fitted =
-        mode === yoga.MEASURE_MODE_UNDEFINED ? asset.width : Math.min(asset.width, available);
+      let fitted = Math.min(asset.width, available);
+      if (mode === yoga.MEASURE_MODE_UNDEFINED) fitted = asset.width;
+      else if (mode === yoga.MEASURE_MODE_EXACTLY) fitted = available;
       return { width: fitted, height: fitted / ratio };
     });
   } else if (height === 'auto') {
@@ -287,7 +302,15 @@ export function layoutBox(
     created.push(yogaNode);
     applyStyle(yoga, yogaNode, style);
     const asset = current.tag === 'pdf-image' ? ctx.images.get(current) : undefined;
-    if (asset) sizeImage(yogaNode, style, asset, yoga);
+    if (asset) {
+      sizeImage(
+        yogaNode,
+        style,
+        asset,
+        yoga,
+        current.parent ? styleFor(current.parent) : undefined,
+      );
+    }
     const isText = current.tag === 'pdf-text';
     const built: Built = { node: current, yoga: yogaNode, children: [], isText };
 

@@ -91,10 +91,20 @@ export async function loadImages(
     node.children.forEach(visit);
   };
   visit(root);
+  // One load per distinct string `src`, so a logo used ten times is fetched once.
+  const shared = new Map<string, Promise<ImageAsset>>();
+  const loadNode = (node: PdfNode): Promise<ImageAsset> => {
+    const src = propsOf(node)['src'];
+    if (typeof src !== 'string') return loadOne(src, writer, fetchFn);
+    let pending = shared.get(src);
+    if (!pending) {
+      pending = loadOne(src, writer, fetchFn);
+      shared.set(src, pending);
+    }
+    return pending;
+  };
   const entries = await Promise.all(
-    nodes.map(
-      async (node) => [node, await loadOne(propsOf(node)['src'], writer, fetchFn)] as const,
-    ),
+    nodes.map(async (node) => [node, await loadNode(node)] as const),
   );
   return new Map(entries);
 }

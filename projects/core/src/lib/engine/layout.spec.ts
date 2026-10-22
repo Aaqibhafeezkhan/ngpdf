@@ -410,4 +410,50 @@ describe('image sizing from the natural size', () => {
   it('keeps both dimensions when both are set', () => {
     expect(size({ width: '40', height: '30' })).toEqual([40, 30]);
   });
+
+  it('keeps the natural size in a centred column', () => {
+    expect(place({}, { 'align-items': 'center' })).toEqual([100, 200, 100]);
+  });
+
+  it('keeps the natural size at the end of a flex-end column', () => {
+    expect(place({}, { 'align-items': 'flex-end' })).toEqual([200, 200, 100]);
+  });
+
+  it('honours an explicit align-self: stretch, the height following the ratio', () => {
+    expect(place({ 'align-self': 'stretch' }, {})).toEqual([0, 400, 200]);
+  });
+
+  it('gives an image with a zero natural size its style size, or nothing', () => {
+    const flat = { data: new Uint8Array(1), width: 0, height: 0 };
+    const sized = el('pdf-image', { width: '30', height: '20' });
+    const bare = el('pdf-image', {});
+    const parent = el('pdf-view', { width: '400' }, [sized, bare]);
+    const box = layoutBox(parent, resolveStyles(parent), 400, {
+      yoga,
+      metrics: writer,
+      images: new Map([
+        [sized, flat],
+        [bare, flat],
+      ]),
+    });
+    expect(box.children.map((c) => [c.w, c.h])).toEqual([
+      [30, 20],
+      [0, 0],
+    ]);
+  });
 });
+
+function place(
+  style: Record<string, string>,
+  parentStyle: Record<string, string>,
+): [number, number, number] {
+  const image = el('pdf-image', style);
+  const parent = el('pdf-view', { width: '400', ...parentStyle }, [image]);
+  const box = layoutBox(parent, resolveStyles(parent), 400, {
+    yoga,
+    metrics: writer,
+    images: new Map([[image, { data: new Uint8Array(1), width: 200, height: 100 }]]),
+  });
+  const child = box.children[0];
+  return [child?.x ?? NaN, child?.w ?? NaN, child?.h ?? NaN];
+}
