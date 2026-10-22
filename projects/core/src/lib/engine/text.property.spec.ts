@@ -3,7 +3,7 @@ import { beforeAll, describe, it } from 'vitest';
 import { toWinAnsi } from './fonts';
 import { ROOT_TEXT_STYLE } from './style';
 import { layoutText } from './text';
-import { createPdfkitWriter, type PdfWriter } from './writer';
+import { createPdfkitWriter, type FontMetrics, type PdfWriter } from './writer';
 
 const noWhitespace = (text: string): string => text.replace(/\s/g, '');
 
@@ -43,5 +43,34 @@ describe('layoutText properties', () => {
 
   it('holds for the seed that once found a kerning overflow', () => {
     fc.assert(property(), { seed: -1214594155 });
+  });
+
+  it('loses nothing and overflows nowhere with kerning that widens text', () => {
+    // Each "-b", "rt" and "_r" draws wider than the sum of its characters, so sums under-estimate.
+    const kerning: FontMetrics = {
+      widthOf: (text) => 10 * text.length + 6 * (text.match(/-b|rt|_r/g)?.length ?? 0),
+      ascent: () => 0,
+    };
+    const parts = fc.array(fc.constantFrom('a', 'b', '-', '_', 'r', 't', ' ', '  ', '.', '/'), {
+      maxLength: 80,
+    });
+    fc.assert(
+      fc.property(parts, fc.integer({ min: 10, max: 120 }), (chars, maxWidth) => {
+        const text = chars.join('');
+        const block = layoutText(text, ROOT_TEXT_STYLE, maxWidth, kerning);
+        const joined = block.lines.map((line) => line.text).join('');
+        return (
+          block.lines.every(
+            (line) =>
+              line.width <= maxWidth &&
+              kerning.widthOf(line.text, 'Helvetica', 1) === line.width &&
+              line.text !== '' &&
+              !line.text.startsWith(' ') &&
+              !line.text.endsWith(' '),
+          ) && noWhitespace(joined) === noWhitespace(text)
+        );
+      }),
+      { numRuns: 500 },
+    );
   });
 });

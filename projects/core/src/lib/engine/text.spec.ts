@@ -13,6 +13,13 @@ const style: TextStyle = {
   lineHeight: 1.5,
 };
 
+// "-b" kerns 6pt wider than the sum of its characters (real Helvetica has no such pair across a
+// break opportunity), so "a-b" sums to 30pt but draws 36pt.
+const kerningMetrics: FontMetrics = {
+  widthOf: (text) => 10 * text.length + (text.includes('-b') ? 6 : 0),
+  ascent: () => 0,
+};
+
 describe('layoutText', () => {
   let writer: PdfWriter;
   beforeAll(async () => {
@@ -88,14 +95,45 @@ describe('layoutText', () => {
   });
 
   it('moves trailing words to the next line when the drawn width overflows', () => {
-    // Metrics where "-b" kerns 6pt wider: "a-b" sums to 30pt but draws 36pt.
-    const kerning: FontMetrics = {
-      widthOf: (text) => 10 * text.length + (text.includes('-b') ? 6 : 0),
-      ascent: () => 0,
-    };
-    const block = layoutText('a-b c', style, 30, kerning);
+    const block = layoutText('a-b c', style, 30, kerningMetrics);
     expect(block.lines.map((line) => line.text)).toEqual(['a-', 'b c']);
     for (const line of block.lines) expect(line.width).toBeLessThanOrEqual(30);
+  });
+
+  it('keeps the words carried to the next line when the text ends there', () => {
+    // "a-b" sums to 30pt but draws 36pt: "b" moves to a second line and is not dropped.
+    const block = layoutText('a-b', style, 30, kerningMetrics);
+    expect(block.lines.map((line) => line.text)).toEqual(['a-', 'b']);
+  });
+
+  it('still splits a word wider than the box after a line carried words over', () => {
+    const block = layoutText('a-b cdefghij', style, 30, kerningMetrics);
+    expect(block.lines.map((line) => line.text)).toEqual(['a-', 'b', 'cde', 'fgh', 'ij']);
+    for (const line of block.lines) expect(line.width).toBeLessThanOrEqual(30);
+  });
+
+  it('lays out 100,000 characters in under 500 ms when every measured line overflows its estimate', () => {
+    // Every multi-character measure draws 25pt wider than the character sum, so each line
+    // takes the narrowing path.
+    const inflating: FontMetrics = {
+      widthOf: (text) => 10 * text.length + (text.length > 1 ? 25 : 0),
+      ascent: () => 0,
+    };
+    const text = 'ab-cd-ef '.repeat(11_112);
+    const timings: number[] = [];
+    for (let run = 0; run < 3; run++) {
+      const started = performance.now();
+      const block = layoutText(text, style, 300, inflating);
+      timings.push(performance.now() - started);
+      expect(block.lines.every((line) => line.width <= 300)).toBe(true);
+      expect(
+        block.lines
+          .map((line) => line.text)
+          .join('')
+          .replace(/ /g, ''),
+      ).toBe(text.replace(/ /g, ''));
+    }
+    expect(Math.min(...timings)).toBeLessThan(500);
   });
 
   it('splits a 100,000-character unbreakable word in under 500 ms', () => {

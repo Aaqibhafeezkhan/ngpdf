@@ -19,6 +19,8 @@ export interface TextBlock {
 const MAX_TEXT_LENGTH = 1_048_576;
 // yoga-layout's MeasureMode.Undefined: no width constraint.
 const MEASURE_MODE_UNDEFINED = 0;
+// How far over `maxWidth` the summed character widths may be and still be tried by measuring.
+const KERNING_SLACK = 1.25;
 
 function assertTextSize(text: string): void {
   if (text.length > MAX_TEXT_LENGTH) throw new Error('ngpdf: text longer than 1 MB');
@@ -29,22 +31,42 @@ function collapseWhitespace(text: string): string {
   return text.replace(/[ \t\r\n]+/g, ' ').trim();
 }
 
-/** A word and whether one collapsed space follows it. Breaks are allowed after each piece. */
-function* pieces(text: string): Generator<{ word: string; space: boolean }> {
+/** Positions in `text` after which a line may break (UAX #14); the last one is `text.length`. */
+function breakPositions(text: string): number[] {
+  const positions: number[] = [];
   const breaker = new LineBreaker(text);
-  let start = 0;
   for (let next = breaker.nextBreak(); next; next = breaker.nextBreak()) {
-    const piece = text.slice(start, next.position);
-    start = next.position;
-    const space = piece.endsWith(' ');
-    yield { word: space ? piece.slice(0, -1) : piece, space };
+    positions.push(next.position);
   }
+  return positions;
+}
+
+/** The largest `index` in `[low, high]` where `holds(index)`, or `low - 1`; `holds` is monotone. */
+function lastWhere(low: number, high: number, holds: (index: number) => boolean): number {
+  let lo = low - 1;
+  let hi = high;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (holds(mid)) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
 }
 
 /**
  * Breaks `text` into lines no wider than `maxWidth`, at Unicode line break opportunities. A word
  * wider than `maxWidth` is split at the last character that fits (at least one per line).
- * Work is linear in the text length.
+ *
+ * Every line's drawn width, `widthOf(line.text)`, is at most `maxWidth`, unless a single character
+ * is wider than `maxWidth`. Kerning makes the drawn width differ from the sum of the character
+ * widths, so the sums (prefix sums, built once) only give a starting guess for each line's end, taken up
+ * to 25% over `maxWidth` to allow for kerning that narrows the text;
+ * the guess is then measured for real and, if it overflows, the end is found by binary search over
+ * the candidate ends, measuring each candidate. A line is never given up without being measured.
+ *
+ * Cost: O(n) for the prefix sums and the break positions, then per line O(log n) steps for the
+ * guess plus O(log k) measures of at most k characters (k is about one line), so O(n log k) in the
+ * worst case. Every line takes at least one character, so no text is lost.
  */
 export function layoutText(
   text: string,
@@ -59,91 +81,76 @@ export function layoutText(
   const size = style.fontSize;
   const lineHeight = size * style.lineHeight;
   const widthOf = (chunk: string): number => metrics.widthOf(chunk, font, size);
-  const spaceWidth = widthOf(' ');
+
+  const length = collapsed.length;
+  // prefix[i] is the summed width of the first i characters (all single UTF-16 units after WinAnsi).
+  const prefix = new Float64Array(length + 1);
+  const charWidths = new Map<string, number>();
+  for (let i = 0; i < length; i++) {
+    const char = collapsed.charAt(i);
+    let charWidth = charWidths.get(char);
+    if (charWidth === undefined) {
+      charWidth = widthOf(char);
+      charWidths.set(char, charWidth);
+    }
+    prefix[i + 1] = (prefix[i] ?? 0) + charWidth;
+  }
+  const breaks = length === 0 ? [] : breakPositions(collapsed);
+
+  /** The end of the text to draw for a line `[start, end)`: a trailing space is not drawn. */
+  const drawnEnd = (end: number): number => (collapsed.charCodeAt(end - 1) === 32 ? end - 1 : end);
+  const guess = (start: number, end: number): number =>
+    (prefix[drawnEnd(end)] ?? 0) - (prefix[start] ?? 0);
+  const measure = (start: number, end: number): number =>
+    widthOf(collapsed.slice(start, drawnEnd(end)));
+  const fits = (start: number, end: number): boolean => measure(start, end) <= maxWidth;
+
+  /** The largest end in `[low, high]` that fits, given that `low` fits and `high` does not. */
+  const narrow = (low: number, high: number, endOf: (index: number) => number, start: number) =>
+    endOf(lastWhere(low, high - 1, (index) => fits(start, endOf(index))));
+
+  // Kerning mostly narrows text, so a line can hold a little more than its character sum says.
+  const guessLimit = maxWidth * KERNING_SLACK;
 
   const lines: TextLine[] = [];
-  // The line being built: each part is a word and the separator (a space or nothing) before it.
-  interface Part {
-    readonly sep: string;
-    readonly word: string;
-    readonly width: number;
+  let start = 0;
+  let nextBreak = 0;
+  while (start < length) {
+    // A piece can hold an inner space (no break before some punctuation): no line starts with one.
+    if (collapsed.charCodeAt(start) === 32) {
+      start++;
+      continue;
+    }
+    while ((breaks[nextBreak] ?? length) <= start) nextBreak++;
+    const firstEnd = breaks[nextBreak] ?? length;
+
+    // Whole words: the last break whose summed width fits, checked and narrowed by measuring.
+    const lastGuess = lastWhere(
+      nextBreak,
+      breaks.length - 1,
+      (index) => guess(start, breaks[index] ?? length) <= guessLimit,
+    );
+    let end = -1;
+    if (lastGuess >= nextBreak) {
+      const guessEnd = breaks[lastGuess] ?? length;
+      if (fits(start, guessEnd)) end = guessEnd;
+      else if (fits(start, firstEnd))
+        end = narrow(nextBreak, lastGuess, (i) => breaks[i] ?? length, start);
+    }
+
+    if (end < 0) {
+      // The first word is wider than the box: split it at the last character that fits.
+      const lastChar = lastWhere(start + 1, firstEnd, (index) => guess(start, index) <= guessLimit);
+      const guessEnd = Math.max(lastChar, start + 1);
+      if (fits(start, guessEnd) || guessEnd === start + 1) end = guessEnd;
+      else if (fits(start, start + 1)) end = narrow(start + 1, guessEnd, (i) => i, start);
+      else end = start + 1;
+    }
+
+    const lineText = collapsed.slice(start, drawnEnd(end));
+    lines.push({ text: lineText, width: widthOf(lineText), y: lines.length * lineHeight });
+    start = end;
   }
-  let parts: Part[] = [];
-  // Sum of the part widths. Kerning makes the drawn width differ, so it only guides the fit;
-  // `flush` checks the real width.
-  let sum = 0;
-  let pendingSpace = false;
-
-  const add = (word: string, width: number): void => {
-    const sep = parts.length > 0 && pendingSpace ? ' ' : '';
-    parts.push({ sep, word, width });
-    sum += (sep === '' ? 0 : spaceWidth) + width;
-  };
-  const textOf = (): string => parts.map((part) => part.sep + part.word).join('');
-
-  /** Emits the line, moving trailing words to the next line while its drawn width overflows. */
-  const flush = (): void => {
-    if (parts.length === 0) return;
-    let lineText = textOf();
-    let lineWidth = widthOf(lineText);
-    const carried: Part[] = [];
-    while (lineWidth > maxWidth && parts.length > 1) {
-      carried.unshift(...parts.splice(-1));
-      lineText = textOf();
-      lineWidth = widthOf(lineText);
-    }
-    lines.push({ text: lineText, width: lineWidth, y: lines.length * lineHeight });
-    const spaceAfter = carried.length > 0 && pendingSpace;
-    parts = [];
-    sum = 0;
-    pendingSpace = false;
-    for (const part of carried) {
-      pendingSpace = part.sep === ' ';
-      add(part.word, part.width);
-    }
-    pendingSpace = spaceAfter;
-  };
-
-  for (const { word, space } of collapsed === '' ? [] : pieces(collapsed)) {
-    const wordWidth = widthOf(word);
-    const gap = pendingSpace ? spaceWidth : 0;
-    if (parts.length > 0 && sum + gap + wordWidth > maxWidth) flush();
-    if (parts.length === 0 && wordWidth > maxWidth) {
-      // Split mid-word. Characters are added by their summed widths, then the chunk's drawn
-      // width is checked and characters are given back until it fits.
-      const chars = Array.from(word);
-      let start = 0;
-      while (start < chars.length) {
-        // A piece can hold inner spaces (no break before some punctuation): a line never starts with one.
-        while (chars[start] === ' ') start++;
-        if (start >= chars.length) break;
-        let end = start;
-        let guess = 0;
-        for (; end < chars.length; end++) {
-          const charWidth = widthOf(String(chars[end]));
-          if (end > start && guess + charWidth > maxWidth) break;
-          guess += charWidth;
-        }
-        let chunk: string;
-        let chunkWidth: number;
-        for (;;) {
-          while (end - start > 1 && chars[end - 1] === ' ') end--;
-          chunk = chars.slice(start, end).join('');
-          chunkWidth = widthOf(chunk);
-          if (chunkWidth <= maxWidth || end - start <= 1) break;
-          end--;
-        }
-        pendingSpace = false;
-        add(chunk, chunkWidth);
-        if (end < chars.length) flush();
-        start = end;
-      }
-    } else {
-      add(word, wordWidth);
-    }
-    pendingSpace = space;
-  }
-  flush();
 
   return {
     lines,
