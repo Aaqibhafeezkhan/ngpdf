@@ -1,0 +1,21 @@
+{
+  "name": "@ngpdf/core",
+  "version": "0.0.0",
+  "description": "ngpdf — write PDFs as Angular components, for Angular",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ngpdf/ngpdf.git"
+  },
+  "peerDependencies": {
+    "@angular/common": "^22.0.0",
+    "@angular/core": "^22.0.0"
+  },
+  "dependencies": {
+    "linebreak": "^1.1.0",
+    "pdfkit": "^0.17.2",
+    "tslib": "^2.3.0",
+    "yoga-layout": "^3.2.1"
+  },
+  "sideEffects": false
+}

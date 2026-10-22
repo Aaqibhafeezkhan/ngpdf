@@ -4,3 +4,6 @@ dist/
 .angular/
 coverage/
 e2e/out/
+out-tsc/
+.husky/_
+*.tsbuildinfo

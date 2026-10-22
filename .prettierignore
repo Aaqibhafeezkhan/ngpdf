@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+.angular
+out-tsc
+package-lock.json
+.superpowers
+e2e/expected
+docs
+AGENTS.md
+CLAUDE.md
