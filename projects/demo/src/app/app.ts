@@ -6,7 +6,12 @@ import { CaptureReport } from './documents/capture-report';
 import { CommunicatorsList } from './documents/communicators-list';
 import { LicencesList } from './documents/licences-list';
 
-export type DemoDocument = 'capture-report' | 'communicators-list' | 'licences-list';
+const DOCUMENT_NAMES = ['capture-report', 'communicators-list', 'licences-list'] as const;
+export type DemoDocument = (typeof DOCUMENT_NAMES)[number];
+
+function isDemoDocument(name: string): name is DemoDocument {
+  return (DOCUMENT_NAMES as readonly string[]).includes(name);
+}
 
 /** Fixed so the end-to-end text does not depend on the day it runs. */
 const CAPTURED_AT = new Date(2026, 9, 22, 14, 30);
@@ -42,8 +47,12 @@ export class App {
     if (isDevMode()) {
       // The end-to-end script drives the demo through this hook; production builds do not have it.
       window.ngpdfDemo = {
-        render: async (name) =>
-          toBase64(await (await this.blobOf(name as DemoDocument)).arrayBuffer()),
+        render: async (name) => {
+          if (!isDemoDocument(name)) {
+            throw new Error(`Unknown demo document "${name}"; use ${DOCUMENT_NAMES.join(', ')}`);
+          }
+          return toBase64(await (await this.blobOf(name)).arrayBuffer());
+        },
       };
     }
   }

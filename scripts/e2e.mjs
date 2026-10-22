@@ -3,10 +3,12 @@
 // it with e2e/expected/<name>.txt. `--update` rewrites the expected files; `--skip-build` reuses
 // dist/demo.
 //
-// Runs on the host: needs node, /usr/bin/google-chrome and pdftotext (poppler-utils). When
-// pdftotext is not installed it runs in a Docker image that has poppler-utils.
+// Runs on the host: needs node, /usr/bin/google-chrome and pdftotext/pdfimages (poppler-utils).
+// The expected files assume poppler 24 (Ubuntu 24.04, which CI uses). Without it on the host, or
+// with NGPDF_E2E_DOCKER=1, one Docker container (Debian bookworm, poppler 22) extracts the text of
+// all PDFs, and the script warns that the versions differ.
 /* global window */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
@@ -21,7 +23,7 @@ const PDFTOTEXT = '/usr/bin/pdftotext';
 
 // Page counts follow from the row geometry: see the report of task 12.
 const DOCUMENTS = [
-  { name: 'capture-report', pages: 1, contains: ['Gerado em 22/10/2026 14:30'] },
+  { name: 'capture-report', pages: 1, images: 1, contains: ['Gerado em 22/10/2026 14:30'] },
   {
     name: 'communicators-list',
     pages: 5,
@@ -31,6 +33,8 @@ const DOCUMENTS = [
 ];
 
 const update = process.argv.includes('--update');
+const TIMEOUT_MS = 60_000;
+const GOLDEN_POPPLER_MAJOR = 24;
 const MIME = {
   '.html': 'text/html',
   '.js': 'text/javascript',
@@ -52,26 +56,78 @@ function serve() {
   return new Promise((done) => server.listen(0, '127.0.0.1', () => done(server)));
 }
 
-function extractText(pdfPath) {
-  if (existsSync(PDFTOTEXT)) {
-    return execFileSync(PDFTOTEXT, ['-layout', pdfPath, '-'], { encoding: 'utf8' });
+const useDocker = process.env.NGPDF_E2E_DOCKER === '1' || !existsSync(PDFTOTEXT);
+
+/** Text of every PDF (layout mode) and its embedded image count, keyed by document name. */
+function extractAll(names) {
+  if (!useDocker) {
+    return Object.fromEntries(
+      names.map((name) => {
+        const pdf = join(OUT, `${name}.pdf`);
+        return [
+          name,
+          {
+            raw: execFileSync(PDFTOTEXT, ['-layout', pdf, '-'], { encoding: 'utf8' }),
+            images: countImages(execFileSync('pdfimages', ['-list', pdf], { encoding: 'utf8' })),
+          },
+        ];
+      }),
+    );
   }
-  return execFileSync(
+  // One container for all PDFs; the text and image listing are separated by markers.
+  const script = [
+    'export DEBIAN_FRONTEND=noninteractive',
+    'apt-get -qq update >/dev/null && apt-get -qq install -y poppler-utils >/dev/null 2>&1',
+    'pdftotext -v >&2',
+    `for n in ${names.join(' ')}; do`,
+    '  echo "@@@TEXT $n"; pdftotext -layout /w/e2e/out/$n.pdf -',
+    '  echo "@@@IMAGES $n"; pdfimages -list /w/e2e/out/$n.pdf',
+    'done',
+  ].join('\n');
+  const output = execFileSync(
     'docker',
-    [
-      'run',
-      '--rm',
-      '-v',
-      `${ROOT}:/w:ro`,
-      '-w',
-      '/w',
-      'node:24-bookworm-slim',
-      'sh',
-      '-c',
-      `apt-get -qq update && apt-get -qq install -y poppler-utils >/dev/null && pdftotext -layout ${pdfPath.replace(ROOT, '/w')} -`,
-    ],
-    { encoding: 'utf8' },
+    ['run', '--rm', '-v', `${ROOT}:/w:ro`, 'node:24-bookworm-slim', 'sh', '-c', script],
+    {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'inherit'],
+      timeout: 5 * 60_000,
+      maxBuffer: 64 * 1024 * 1024,
+    },
   );
+  const result = {};
+  for (const name of names) {
+    const text = output.split(`@@@TEXT ${name}\n`)[1]?.split('@@@IMAGES')[0] ?? '';
+    const images = output.split(`@@@IMAGES ${name}\n`)[1]?.split('@@@TEXT')[0] ?? '';
+    result[name] = { raw: text, images: countImages(images) };
+  }
+  return result;
+}
+
+/** Images in a `pdfimages -list` listing; soft masks (a PNG's alpha) are not counted. */
+function countImages(listing) {
+  return listing
+    .split('\n')
+    .slice(2)
+    .filter((line) => line.trim().split(/\s+/)[2] === 'image').length;
+}
+
+function pdftotextMajor() {
+  if (useDocker) return 22; // Debian bookworm
+  // pdftotext prints its version on stderr.
+  const result = spawnSync(PDFTOTEXT, ['-v'], { encoding: 'utf8' });
+  return Number(/version (\d+)/.exec(`${result.stdout}${result.stderr}`)?.[1]);
+}
+
+/** Fails with a clear message when a browser step takes longer than TIMEOUT_MS. */
+function within(promise, what) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`e2e: timed out after ${TIMEOUT_MS / 1000} s: ${what}`)),
+      TIMEOUT_MS,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 const normalizeText = (text) =>
@@ -103,24 +159,43 @@ if (!process.argv.includes('--skip-build')) {
 mkdirSync(OUT, { recursive: true });
 mkdirSync(EXPECTED, { recursive: true });
 
+const major = pdftotextMajor();
+if (major !== GOLDEN_POPPLER_MAJOR) {
+  console.warn(
+    `warning: pdftotext ${major}.x, the expected files were made with ${GOLDEN_POPPLER_MAJOR}.x; text layout may differ`,
+  );
+}
+
 const server = await serve();
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: true,
-  args: ['--no-sandbox'],
-});
+let browser;
 let failed = false;
 try {
+  browser = await within(
+    puppeteer.launch({
+      executablePath: CHROME,
+      headless: true,
+      args: ['--no-sandbox'],
+      timeout: TIMEOUT_MS,
+    }),
+    `launching ${CHROME}`,
+  );
   const page = await browser.newPage();
+  page.setDefaultTimeout(TIMEOUT_MS);
   page.on('pageerror', (error) => console.error('page error:', error.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  await page.waitForFunction(() => window.ngpdfDemo !== undefined);
+  await within(page.goto(`http://127.0.0.1:${server.address().port}/`), 'opening the demo');
+  await page.waitForFunction(() => window.ngpdfDemo !== undefined, { timeout: TIMEOUT_MS });
 
+  for (const { name } of DOCUMENTS) {
+    const base64 = await within(
+      page.evaluate((documentName) => window.ngpdfDemo.render(documentName), name),
+      `rendering ${name}`,
+    );
+    writeFileSync(join(OUT, `${name}.pdf`), Buffer.from(base64, 'base64'));
+  }
+
+  const extracted = extractAll(DOCUMENTS.map((document) => document.name));
   for (const document of DOCUMENTS) {
-    const base64 = await page.evaluate((name) => window.ngpdfDemo.render(name), document.name);
-    const pdfPath = join(OUT, `${document.name}.pdf`);
-    writeFileSync(pdfPath, Buffer.from(base64, 'base64'));
-    const raw = extractText(pdfPath);
+    const { raw, images } = extracted[document.name];
     const text = normalizeText(raw);
     const expectedPath = join(EXPECTED, `${document.name}.txt`);
 
@@ -129,6 +204,8 @@ try {
     const pageCount = (raw.match(/\f/g) ?? []).length;
     if (pageCount !== document.pages)
       problems.push(`expected ${document.pages} pages, got ${pageCount}`);
+    if (images !== (document.images ?? 0))
+      problems.push(`expected ${document.images ?? 0} embedded images, got ${images}`);
     for (const needle of document.contains) {
       if (!text.includes(needle)) problems.push(`text does not contain "${needle}"`);
     }
@@ -151,8 +228,11 @@ try {
       );
     }
   }
+} catch (error) {
+  failed = true;
+  console.error(error instanceof Error ? error.message : error);
 } finally {
-  await browser.close();
+  await browser?.close();
   server.close();
 }
 if (failed) process.exit(1);

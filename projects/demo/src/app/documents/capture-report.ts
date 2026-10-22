@@ -12,7 +12,7 @@ import { PDF_ELEMENTS } from '@ngpdf/core';
         <pdf-text style="font-size: 10; color: #555555; margin-top: 4; margin-bottom: 14">
           {{ 'Gerado em ' + (capturedAt() | date: 'dd/MM/yyyy HH:mm') }}
         </pdf-text>
-        <pdf-image [src]="image()" style="width: 100%; height: 420; object-fit: contain" />
+        <pdf-image [src]="image()" style="width: 100%; height: 469; object-fit: contain" />
       </pdf-page>
     </pdf-document>
   `,
