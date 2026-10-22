@@ -376,3 +376,38 @@ describe('passes and cleanup', () => {
     expect(live.size).toBe(0);
   });
 });
+
+describe('image sizing from the natural size', () => {
+  const asset = { data: new Uint8Array(1), width: 200, height: 100 };
+  const size = (style: Record<string, string>, available = 1000): [number, number] => {
+    const image = el('pdf-image', style);
+    const parent = el('pdf-view', { width: String(available) }, [image]);
+    const box = layoutBox(parent, resolveStyles(parent), available, {
+      yoga,
+      metrics: writer,
+      images: new Map([[image, asset]]),
+    });
+    const child = box.children[0];
+    return [child?.w ?? NaN, child?.h ?? NaN];
+  };
+
+  it('derives the height from the width', () => {
+    expect(size({ width: '300' })).toEqual([300, 150]);
+  });
+
+  it('derives the width from the height', () => {
+    expect(size({ height: '50' })).toEqual([100, 50]);
+  });
+
+  it('uses the natural size when neither is set', () => {
+    expect(size({})).toEqual([200, 100]);
+  });
+
+  it('caps the natural size to the available width keeping the ratio', () => {
+    expect(size({}, 100)).toEqual([100, 50]);
+  });
+
+  it('keeps both dimensions when both are set', () => {
+    expect(size({ width: '40', height: '30' })).toEqual([40, 30]);
+  });
+});

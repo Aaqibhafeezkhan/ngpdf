@@ -150,6 +150,32 @@ function styleOf(styles: ReadonlyMap<PdfNode, ResolvedStyle>, node: PdfNode): Re
   return style;
 }
 
+/**
+ * An image with one dimension set follows the aspect ratio for the other; with none set it
+ * takes its natural size (1 pixel = 1pt), capped to the available width.
+ */
+function sizeImage(node: YogaNode, style: ResolvedStyle, asset: ImageAsset, yoga: Yoga): void {
+  const ratio = asset.width / asset.height;
+  const { width, height } = style;
+  if (width === 'auto' && height === 'auto') {
+    // Measured, so the width can be capped while the height follows it. A stretching parent
+    // would widen the image to the parent, so it is aligned to the start instead.
+    if (style.alignSelf === 'auto' || style.alignSelf === 'stretch') {
+      node.setAlignSelf(yoga.ALIGN_FLEX_START);
+    }
+    node.setMeasureFunc((available, mode) => {
+      const fitted =
+        mode === yoga.MEASURE_MODE_UNDEFINED ? asset.width : Math.min(asset.width, available);
+      return { width: fitted, height: fitted / ratio };
+    });
+  } else if (height === 'auto') {
+    node.setAspectRatio(ratio);
+  } else if (width === 'auto') {
+    if (typeof height === 'number') node.setWidth(height * ratio);
+    else node.setAspectRatio(ratio);
+  }
+}
+
 const zeroEdge: Length = 0;
 
 function isZero(length: Length): boolean {
@@ -260,6 +286,8 @@ export function layoutBox(
     const yogaNode = yoga.Node.create(config);
     created.push(yogaNode);
     applyStyle(yoga, yogaNode, style);
+    const asset = current.tag === 'pdf-image' ? ctx.images.get(current) : undefined;
+    if (asset) sizeImage(yogaNode, style, asset, yoga);
     const isText = current.tag === 'pdf-text';
     const built: Built = { node: current, yoga: yogaNode, children: [], isText };
 
