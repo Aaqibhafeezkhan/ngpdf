@@ -181,10 +181,9 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
 
     imageSize,
 
-    write(pages, info) {
+    async write(pages, info) {
       const doc = new PDFDocument({
         autoFirstPage: false,
-        bufferPages: true,
         compress,
         info: {
           ...(info.title !== undefined && { Title: info.title }),
@@ -202,11 +201,17 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
         });
         doc.on('error', reject);
       });
+      // One data URL per source array in this write, so a repeated image is encoded once.
+      const dataUrls = new WeakMap<Uint8Array, string>();
       try {
         for (const page of pages) {
           doc.addPage({ size: [page.width, page.height], margin: 0 });
-          for (const op of page.ops) drawOp(doc, op);
+          for (const op of page.ops) drawOp(doc, op, dataUrls);
         }
+      } catch (error) {
+        // Nobody awaits `done` on this path; keep a late stream error from going unhandled.
+        done.catch(() => undefined);
+        throw error;
       } finally {
         doc.end();
       }
@@ -217,7 +222,7 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
 
 type Doc = InstanceType<Awaited<typeof import('pdfkit/js/pdfkit.standalone.js')>['default']>;
 
-function drawOp(doc: Doc, op: DrawOp): void {
+function drawOp(doc: Doc, op: DrawOp, dataUrls: WeakMap<Uint8Array, string>): void {
   switch (op.op) {
     case 'rect':
       doc.save();
@@ -245,13 +250,19 @@ function drawOp(doc: Doc, op: DrawOp): void {
       });
       doc.restore();
       return;
-    case 'image':
+    case 'image': {
       doc.save();
       doc.rect(op.clip.x, op.clip.y, op.clip.w, op.clip.h).clip();
       doc.fillOpacity(op.opacity);
-      doc.image(toDataUrl(op.data), op.x, op.y, { width: op.w, height: op.h });
+      let url = dataUrls.get(op.data);
+      if (url === undefined) {
+        url = toDataUrl(op.data);
+        dataUrls.set(op.data, url);
+      }
+      doc.image(url, op.x, op.y, { width: op.w, height: op.h });
       doc.restore();
       return;
+    }
     default:
       return assertNever(op);
   }

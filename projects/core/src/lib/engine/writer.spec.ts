@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPdfkitWriter, type DrawOp, type PdfWriter } from './writer';
 
 /** 3x2 8-bit grayscale PNG, generated so no binary file sits in the repo. */
@@ -196,5 +196,153 @@ describe('createPdfkitWriter', () => {
     ];
     const blob = await writer.write([{ width: 20, height: 20, ops }], info);
     expect(blob.size).toBeGreaterThan(0);
+  });
+
+  describe('content stream', () => {
+    const TEXT_OP: DrawOp = {
+      op: 'text',
+      x: 10,
+      y: 10,
+      text: 'decorated',
+      font: 'Helvetica',
+      size: 12,
+      color: '#000000',
+      opacity: 0.4,
+      underline: true,
+      strike: true,
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    async function pdfText(ops: DrawOp[]): Promise<string> {
+      const blob = await writer.write([{ width: 200, height: 200, ops }], info);
+      return new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
+    }
+
+    /** Page content streams only: the ones that open a graphics state. */
+    function contentOf(pdf: string): string {
+      return [...pdf.matchAll(/stream\n([\s\S]*?)\nendstream/g)]
+        .map((match) => match[1] ?? '')
+        .filter((body) => /^q$/m.test(body))
+        .join('\n');
+    }
+
+    const count = (haystack: string, pattern: RegExp) => haystack.match(pattern)?.length ?? 0;
+
+    it('rejects, instead of throwing synchronously, on an unknown op', async () => {
+      const bad = { op: 'blob' } as unknown as DrawOp;
+      let pending: Promise<Blob> | undefined;
+      expect(() => {
+        pending = writer.write([{ ...A4, ops: [bad] }], info);
+      }).not.toThrow();
+      await expect(pending).rejects.toThrow('ngpdf: unhandled draw op {"op":"blob"}');
+    });
+
+    it('leaves no unhandled rejection after a failed write', async () => {
+      const unhandled = vi.fn();
+      process.on('unhandledRejection', unhandled);
+      try {
+        const bad = { op: 'blob' } as unknown as DrawOp;
+        await expect(writer.write([{ ...A4, ops: [bad] }], info)).rejects.toThrow(/unhandled/);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(unhandled).not.toHaveBeenCalled();
+      } finally {
+        process.off('unhandledRejection', unhandled);
+      }
+    });
+
+    it('draws a rounded rect with curve operators and a square one without', async () => {
+      const rounded = contentOf(
+        await pdfText([
+          { op: 'rect', x: 10, y: 10, w: 80, h: 40, radius: 6, fill: '#ff0000', opacity: 1 },
+        ]),
+      );
+      expect(count(rounded, /\sc\n/g)).toBe(4);
+      expect(rounded).toMatch(/\nf\n/);
+      const square = contentOf(
+        await pdfText([
+          { op: 'rect', x: 10, y: 10, w: 80, h: 40, radius: 0, fill: '#ff0000', opacity: 1 },
+        ]),
+      );
+      expect(square).toContain('10 10 80 40 re');
+      expect(count(square, /\sc\n/g)).toBe(0);
+    });
+
+    it('clips an image with re + W n and paints it with Do', async () => {
+      const content = contentOf(
+        await pdfText([
+          {
+            op: 'image',
+            x: 5,
+            y: 5,
+            w: 30,
+            h: 20,
+            clip: { x: 5, y: 5, w: 20, h: 20 },
+            data: tinyPng(),
+            opacity: 0.8,
+          },
+        ]),
+      );
+      expect(content).toMatch(/5 5 20 20 re\nW n\n/);
+      expect(content).toMatch(/\/I\d+ Do\n/);
+      expect(content.indexOf('W n')).toBeLessThan(content.indexOf(' Do'));
+    });
+
+    it('sets opacity through an ExtGState and balances q and Q', async () => {
+      const pdf = await pdfText([
+        { op: 'rect', x: 0, y: 0, w: 10, h: 10, radius: 0, fill: '#000', opacity: 0.5 },
+        { op: 'line', x1: 0, y1: 0, x2: 9, y2: 9, width: 1, color: '#00f' },
+        TEXT_OP,
+        {
+          op: 'image',
+          x: 0,
+          y: 0,
+          w: 3,
+          h: 2,
+          clip: { x: 0, y: 0, w: 3, h: 2 },
+          data: tinyPng(),
+          opacity: 0.8,
+        },
+      ]);
+      const content = contentOf(pdf);
+      expect(content).toMatch(/\/Gs\d+ gs\n/);
+      expect(pdf).toMatch(/\/ca 0\.5\b/);
+      expect(count(content, /^q$/gm)).toBeGreaterThanOrEqual(4);
+      expect(count(content, /^q$/gm)).toBe(count(content, /^Q$/gm));
+    });
+
+    it('strokes underline and strike at the text opacity', async () => {
+      const pdf = await pdfText([TEXT_OP]);
+      expect(pdf).toMatch(/\/CA 0\.4\b/);
+      expect(pdf).toMatch(/\/ca 0\.4\b/);
+      const plain = await pdfText([{ ...TEXT_OP, underline: false, strike: false }]);
+      expect(plain).toMatch(/\/ca 0\.4\b/);
+      expect(plain).not.toMatch(/\/CA /);
+    });
+
+    it('encodes each image data URL once per write, per Uint8Array', async () => {
+      const btoaSpy = vi.spyOn(globalThis, 'btoa');
+      const shared = tinyPng();
+      const image = (data: Uint8Array): DrawOp => ({
+        op: 'image',
+        x: 0,
+        y: 0,
+        w: 3,
+        h: 2,
+        clip: { x: 0, y: 0, w: 3, h: 2 },
+        data,
+        opacity: 1,
+      });
+      await pdfText([image(shared), image(shared), image(shared)]);
+      expect(btoaSpy).toHaveBeenCalledTimes(1);
+      btoaSpy.mockClear();
+      await pdfText([image(shared), image(tinyPng())]);
+      expect(btoaSpy).toHaveBeenCalledTimes(2);
+      btoaSpy.mockClear();
+      await pdfText([image(shared)]);
+      expect(btoaSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });
