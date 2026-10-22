@@ -87,26 +87,28 @@ export async function renderDocument(
     loadYogaOnce(),
     options.writer ?? createPdfkitWriter({ compress: true }),
   ]);
-  const styles = resolveStyles(root);
-  const images = await loadImages(root, writer);
-  const ctx: LayoutContext = { yoga, metrics: writer, images, warn, warnChars };
+  try {
+    const styles = resolveStyles(root);
+    const images = await loadImages(root, writer);
+    const ctx: LayoutContext = { yoga, metrics: writer, images, warn, warnChars };
 
-  const layouts = elementChildren(document)
-    .filter((child) => child.tag === 'pdf-page')
-    .flatMap((child) => paginatePage(child, styles, ctx));
-  const pages: PageOps[] = layouts.map((layout, index) => ({
-    width: layout.width,
-    height: layout.height,
-    ops: displayList(layout, index, layouts.length, undefined, {
-      metrics: writer,
-      warn: warnChars,
-    }),
-  }));
-
-  if (replaced.size > 0) {
-    warn(`ngpdf: characters outside WinAnsi replaced with "?": ${[...replaced].join('')}`);
+    const layouts = elementChildren(document)
+      .filter((child) => child.tag === 'pdf-page')
+      .flatMap((child) => paginatePage(child, styles, ctx));
+    const pages: PageOps[] = layouts.map((layout, index) => ({
+      width: layout.width,
+      height: layout.height,
+      ops: displayList(layout, index, layouts.length, undefined, {
+        metrics: writer,
+        warn: warnChars,
+      }),
+    }));
+    return await writer.write(pages, infoOf(document, now));
+  } finally {
+    // Also on failure: a warning often explains why the render broke.
+    if (replaced.size > 0) {
+      warn(`ngpdf: characters outside WinAnsi replaced with "?": ${[...replaced].join('')}`);
+    }
+    if (dev) for (const message of warnings) console.warn(message);
   }
-  const blob = await writer.write(pages, infoOf(document, now));
-  if (dev) for (const message of warnings) console.warn(message);
-  return blob;
 }

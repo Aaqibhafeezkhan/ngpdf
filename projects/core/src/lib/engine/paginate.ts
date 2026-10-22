@@ -12,6 +12,8 @@ export interface PlacedBox {
   /** On a sliced decoration: this piece's top or bottom edge is a page cut, so no border there. */
   readonly sliceTop?: boolean;
   readonly sliceBottom?: boolean;
+  /** Product of the opacities of the ancestors that are not part of `box` (default 1). */
+  readonly opacity?: number;
 }
 
 export interface PageLayout {
@@ -21,7 +23,12 @@ export interface PageLayout {
   readonly placed: readonly PlacedBox[];
   /** Page and wrapper backgrounds and borders, outer first, drawn before `placed`. */
   readonly decorations: readonly PlacedBox[];
-  readonly pageNumber?: { readonly box: Box; readonly x: number; readonly y: number };
+  readonly pageNumber?: {
+    readonly box: Box;
+    readonly x: number;
+    readonly y: number;
+    readonly opacity?: number;
+  };
 }
 
 const PAGE_SIZES = new Map<string, readonly [number, number]>([
@@ -64,15 +71,21 @@ interface Header {
   readonly height: number;
   /** The table's gap, kept between a repeated header and the row under it. */
   readonly gap: number;
+  /** Opacity of the table and its ancestors, which the header rows inherit. */
+  readonly opacity: number;
 }
 
 interface Unit extends Flowed {
+  /** Product of the opacities of the wrappers (and the page) above the unit. */
+  readonly opacity: number;
   readonly bottom: number;
   readonly header: Header | null;
 }
 
 /** A column pdf-view or a table the units were taken from; it covers units first..last. */
 interface Wrapper extends Flowed {
+  /** Product of the opacities of the wrappers (and the page) above this one. */
+  readonly opacity: number;
   readonly bottom: number;
   readonly first: number;
   last: number;
@@ -89,6 +102,11 @@ const NO_BORDER: Edges<number> = { top: 0, right: 0, bottom: 0, left: 0 };
 function lengthIn(length: Length, base: number): number {
   if (length === 'auto') return 0;
   return typeof length === 'number' ? length : (length.percent / 100) * base;
+}
+
+/** An `opacity` entry only when it changes anything. */
+function fade(opacity: number): { opacity?: number } {
+  return opacity === 1 ? {} : { opacity };
 }
 
 function draws(style: ResolvedStyle): boolean {
@@ -116,16 +134,31 @@ function isHeaderRow(node: PdfNode): boolean {
  * Units in flow order, and the wrappers they came from in pre-order (outer first). A header
  * taller than `maxHeader` (the content area) is not repeated: its rows become plain units.
  */
-function collectUnits(content: Box, maxHeader: number): Collected {
+function collectUnits(content: Box, maxHeader: number, pageOpacity: number): Collected {
   const units: Unit[] = [];
   const wrappers: Wrapper[] = [];
 
-  const visit = (box: Box, x: number, top: number, header: Header | null): void => {
+  const visit = (
+    box: Box,
+    x: number,
+    top: number,
+    header: Header | null,
+    opacity: number,
+  ): void => {
     if (!isWrapper(box)) {
-      units.push({ box, x, top, bottom: top + box.h, header });
+      units.push({ box, x, top, bottom: top + box.h, header, opacity });
       return;
     }
-    const wrapper: Wrapper = { box, x, top, bottom: top + box.h, first: units.length, last: 0 };
+    const wrapper: Wrapper = {
+      box,
+      x,
+      top,
+      opacity,
+      bottom: top + box.h,
+      first: units.length,
+      last: 0,
+    };
+    const inside = opacity * box.style.opacity;
     wrappers.push(wrapper);
     let children = box.children;
     let childHeader = header;
@@ -145,19 +178,20 @@ function collectUnits(content: Box, maxHeader: number): Collected {
             top: headerTop,
             height: headerBottom - headerTop,
             gap: box.style.gap,
+            opacity: inside,
           };
           children = body;
         }
       }
     }
-    for (const child of children) visit(child, x + child.x, top + child.y, childHeader);
+    for (const child of children) visit(child, x + child.x, top + child.y, childHeader, inside);
     wrapper.last = units.length - 1;
   };
 
   if (content.style.flexDirection === 'row') {
-    units.push({ box: content, x: 0, top: 0, bottom: content.h, header: null });
+    units.push({ box: content, x: 0, top: 0, bottom: content.h, header: null, opacity: 1 });
   } else {
-    for (const child of content.children) visit(child, child.x, child.y, null);
+    for (const child of content.children) visit(child, child.x, child.y, null, pageOpacity);
   }
   return { units, wrappers };
 }
@@ -277,6 +311,7 @@ export function paginatePage(
     box: numberBox,
     x: frame.left,
     y: frame.bottom,
+    ...fade(pageStyle.opacity),
   };
 
   // The content without the page number, laid out as a plain box at the content width.
@@ -297,7 +332,7 @@ export function paginatePage(
   const contentStyles = new Map(styles).set(content, contentStyle);
   const laid = layoutBox(content, contentStyles, frame.contentWidth, ctx);
   const contentHeight = frame.bottom - frame.top;
-  const { units, wrappers } = collectUnits(laid, contentHeight);
+  const { units, wrappers } = collectUnits(laid, contentHeight, pageStyle.opacity);
 
   // Per unit: the outermost wrapper top opening at it, the outermost wrapper bottom closing at
   // it, and whether any of them asks for a page break.
@@ -324,13 +359,13 @@ export function paginatePage(
 
   const placements: Placement[] = [];
 
-  const place = (box: Box, x: number, y: number): void => {
+  const place = (box: Box, x: number, y: number, opacity: number): void => {
     if (y + box.h > frame.bottom + EPSILON) {
       const what = isHeaderRow(box.node) ? `${box.node.tag} header` : box.node.tag;
       warn(`ngpdf: ${what} is taller than a page and is cut at the bottom`);
-      current.placed.push({ box, x, y, clipBottom: frame.bottom });
+      current.placed.push({ box, x, y, clipBottom: frame.bottom, ...fade(opacity) });
     } else {
-      current.placed.push({ box, x, y });
+      current.placed.push({ box, x, y, ...fade(opacity) });
     }
   };
 
@@ -368,11 +403,11 @@ export function paginatePage(
     const { header, leadFlow, leadTop, top } = next;
     if (header) {
       for (const row of header.rows) {
-        place(row.box, frame.left + row.x, leadTop + row.top - header.top);
+        place(row.box, frame.left + row.x, leadTop + row.top - header.top, header.opacity);
       }
       current.headers.add(header);
     }
-    place(unit.box, frame.left + unit.x, top);
+    place(unit.box, frame.left + unit.x, top, unit.opacity);
     current.units++;
     current.lastUnit = index;
     cursor = top + unit.box.h;
@@ -393,6 +428,8 @@ export function paginatePage(
       y: 0,
       w: frame.width,
       h: frame.height,
+      padding: NO_BORDER,
+      border: pageStyle.borderWidth,
       children: [],
     };
     for (const built of pages) built.decorations.push({ box, x: 0, y: 0 });
@@ -415,6 +452,7 @@ export function paginatePage(
         y: top,
         sliceTop: p !== first.page,
         sliceBottom: p !== last.page,
+        ...fade(wrapper.opacity),
       });
     }
   }

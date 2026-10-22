@@ -14,6 +14,9 @@ export interface Box {
   readonly y: number;
   readonly w: number;
   readonly h: number;
+  /** Resolved padding and border widths in points, as Yoga computed them (percentages included). */
+  readonly padding: Edges<number>;
+  readonly border: Edges<number>;
   readonly text?: TextBlock;
   readonly image?: ImageAsset;
   readonly children: readonly Box[];
@@ -371,6 +374,13 @@ export function layoutBox(
   };
 
   // Only the final pass reads boxes, so text is wrapped once per node.
+  const edgesOf = (get: (edge: Edge) => number): Edges<number> => ({
+    top: get(yoga.EDGE_TOP),
+    right: get(yoga.EDGE_RIGHT),
+    bottom: get(yoga.EDGE_BOTTOM),
+    left: get(yoga.EDGE_LEFT),
+  });
+
   const read = (built: Built): Box => {
     const { node: current, yoga: yogaNode } = built;
     const style = styleFor(current);
@@ -382,6 +392,8 @@ export function layoutBox(
       y: yogaNode.getComputedTop(),
       w: yogaNode.getComputedWidth(),
       h: yogaNode.getComputedHeight(),
+      padding: edgesOf((edge) => yogaNode.getComputedPadding(edge)),
+      border: edgesOf((edge) => yogaNode.getComputedBorder(edge)),
       ...(built.isText
         ? {
             text: layoutText(

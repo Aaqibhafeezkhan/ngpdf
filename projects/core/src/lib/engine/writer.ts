@@ -38,6 +38,7 @@ export type DrawOp =
       readonly y2: number;
       readonly width: number;
       readonly color: string;
+      readonly opacity: number;
     }
   | {
       readonly op: 'text';
@@ -234,7 +235,7 @@ function drawOp(doc: Doc, op: DrawOp, dataUrls: WeakMap<Uint8Array, string>): vo
       return;
     case 'line':
       doc.save();
-      doc.lineWidth(op.width).strokeColor(op.color);
+      doc.lineWidth(op.width).strokeColor(op.color, op.opacity);
       doc.moveTo(op.x1, op.y1).lineTo(op.x2, op.y2).stroke();
       doc.restore();
       return;

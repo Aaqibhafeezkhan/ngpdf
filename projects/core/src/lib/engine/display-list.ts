@@ -3,29 +3,17 @@ import { fontFor, toWinAnsi } from './fonts';
 import { fitImage } from './images';
 import type { Box } from './layout';
 import type { PageLayout, PlacedBox } from './paginate';
-import type { Edges, Length, ResolvedStyle } from './style';
+import type { ResolvedStyle } from './style';
 import type { DrawOp, FontMetrics } from './writer';
 
 export interface DisplayListOptions {
-  /** Measures the page number text; without it the number is placed at the left of its box. */
-  readonly metrics?: FontMetrics;
+  /** Measures the page number text. */
+  readonly metrics: FontMetrics;
   /** Receives the characters of the page number format that WinAnsi cannot show. */
   readonly warn?: (chars: string[]) => void;
 }
 
 const DEFAULT_FORMAT = '{page} / {total}';
-
-function lengthIn(length: Length, base: number): number {
-  if (length === 'auto') return 0;
-  return typeof length === 'number' ? length : (length.percent / 100) * base;
-}
-
-/** The inset of each side (padding plus border), percentages taken of `base`. */
-function insets(style: ResolvedStyle, base: number): Edges<number> {
-  const side = (edge: keyof Edges<Length>): number =>
-    lengthIn(style.padding[edge], base) + style.borderWidth[edge];
-  return { top: side('top'), right: side('right'), bottom: side('bottom'), left: side('left') };
-}
 
 interface Cuts {
   readonly top: boolean;
@@ -43,11 +31,12 @@ function drawBox(
   y: number,
   limit: number,
   cuts: Cuts,
-  parentWidth: number,
+  inherited: number,
   out: DrawOp[],
 ): void {
   const { style } = box;
-  const { opacity } = style;
+  // Opacity multiplies down the tree, so a faded view fades what it holds.
+  const opacity = inherited * style.opacity;
 
   const bottomEdge = Math.min(y + box.h, limit);
   if (style.backgroundColor !== null && bottomEdge > y) {
@@ -63,14 +52,14 @@ function drawBox(
     });
   }
 
-  const { top, right, bottom, left } = style.borderWidth;
+  const { top, right, bottom, left } = box.border;
   const color = style.borderColor;
   const line = (x1: number, y1: number, x2: number, y2: number, width: number, c: string): void => {
     const cutY1 = Math.min(y1, limit);
     const cutY2 = Math.min(y2, limit);
     // A line wholly below the limit is gone; a vertical one is shortened.
     if (y1 >= limit && y2 >= limit) return;
-    out.push({ op: 'line', x1, y1: cutY1, x2, y2: cutY2, width, color: c });
+    out.push({ op: 'line', x1, y1: cutY1, x2, y2: cutY2, width, color: c, opacity });
   };
   if (top > 0 && !cuts.top) line(x, y + top / 2, x + box.w, y + top / 2, top, color.top);
   if (right > 0)
@@ -80,7 +69,13 @@ function drawBox(
   }
   if (left > 0) line(x + left / 2, y, x + left / 2, y + box.h, left, color.left);
 
-  const inset = insets(style, parentWidth);
+  // Padding plus border, as laid out.
+  const inset = {
+    top: box.padding.top + box.border.top,
+    right: box.padding.right + box.border.right,
+    bottom: box.padding.bottom + box.border.bottom,
+    left: box.padding.left + box.border.left,
+  };
   const contentLeft = x + inset.left;
   const contentTop = y + inset.top;
   const contentWidth = Math.max(0, box.w - inset.left - inset.right);
@@ -88,7 +83,7 @@ function drawBox(
 
   for (const child of box.children) {
     const nested = { top: false, bottom: false };
-    drawBox(child, x + child.x, y + child.y, limit, nested, contentWidth, out);
+    drawBox(child, x + child.x, y + child.y, limit, nested, opacity, out);
   }
 
   if (box.text) {
@@ -141,15 +136,14 @@ function alignedX(
   return left;
 }
 
-function drawPlaced(placed: PlacedBox, pageWidth: number, out: DrawOp[]): void {
+function drawPlaced(placed: PlacedBox, out: DrawOp[]): void {
   drawBox(
     placed.box,
     placed.x,
     placed.y,
     placed.clipBottom ?? Infinity,
     { top: placed.sliceTop === true, bottom: placed.sliceBottom === true },
-    // The wrapper that holds a unit is not recorded; the page width is the nearest known base.
-    pageWidth,
+    placed.opacity ?? 1,
     out,
   );
 }
@@ -162,16 +156,16 @@ export function displayList(
   page: PageLayout,
   pageIndex: number,
   pageCount: number,
-  pageNumberFormat?: string,
-  options: DisplayListOptions = {},
+  pageNumberFormat: string | undefined,
+  options: DisplayListOptions,
 ): DrawOp[] {
   const out: DrawOp[] = [];
-  for (const decoration of page.decorations) drawPlaced(decoration, page.width, out);
-  for (const placed of page.placed) drawPlaced(placed, page.width, out);
+  for (const decoration of page.decorations) drawPlaced(decoration, out);
+  for (const placed of page.placed) drawPlaced(placed, out);
 
   if (page.pageNumber) {
     const { box, x, y } = page.pageNumber;
-    drawBox(box, x, y, Infinity, { top: false, bottom: false }, page.width, out);
+    drawBox(box, x, y, Infinity, { top: false, bottom: false }, page.pageNumber.opacity ?? 1, out);
     const format = pageNumberFormat ?? stringProp(propsOf(box.node)['format']) ?? DEFAULT_FORMAT;
     const filled = format
       .replaceAll('{page}', () => String(pageIndex + 1))
@@ -179,18 +173,19 @@ export function displayList(
     const text = toWinAnsi(filled, options.warn ?? (() => undefined));
     const { style } = box;
     const font = fontFor(style);
-    const inset = insets(style, page.width);
-    const contentWidth = Math.max(0, box.w - inset.left - inset.right);
-    const width = options.metrics?.widthOf(text, font, style.fontSize) ?? 0;
+    const left = box.padding.left + box.border.left;
+    const top = box.padding.top + box.border.top;
+    const contentWidth = Math.max(0, box.w - left - box.padding.right - box.border.right);
+    const width = options.metrics.widthOf(text, font, style.fontSize);
     out.push({
       op: 'text',
-      x: alignedX(x + inset.left, contentWidth, width, style.textAlign),
-      y: y + inset.top,
+      x: alignedX(x + left, contentWidth, width, style.textAlign),
+      y: y + top,
       text,
       font,
       size: style.fontSize,
       color: style.color,
-      opacity: style.opacity,
+      opacity: (page.pageNumber.opacity ?? 1) * style.opacity,
       underline: style.textDecoration === 'underline',
       strike: style.textDecoration === 'line-through',
     });

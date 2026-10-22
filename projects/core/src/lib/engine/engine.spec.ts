@@ -181,6 +181,13 @@ describe('renderDocument', () => {
       );
     });
 
+    it('still prints the warnings when the write fails', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const writer = { ...recordingWriter(), write: () => Promise.reject(new Error('disk full')) };
+      await expect(renderDocument(tallPage(), { writer, dev: true })).rejects.toThrow('disk full');
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
     it('prints nothing when dev is false', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       await renderDocument(tallPage(), { writer: recordingWriter(), dev: false });

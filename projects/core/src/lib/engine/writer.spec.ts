@@ -108,7 +108,7 @@ describe('createPdfkitWriter', () => {
   it('draws lines, strike text, images and one page per entry', async () => {
     const png = tinyPng();
     const ops: DrawOp[] = [
-      { op: 'line', x1: 0, y1: 0, x2: 50, y2: 50, width: 2, color: '#00f' },
+      { op: 'line', x1: 0, y1: 0, x2: 50, y2: 50, width: 2, color: '#00f', opacity: 1 },
       {
         op: 'text',
         x: 0,
@@ -293,7 +293,7 @@ describe('createPdfkitWriter', () => {
     it('sets opacity through an ExtGState and balances q and Q', async () => {
       const pdf = await pdfText([
         { op: 'rect', x: 0, y: 0, w: 10, h: 10, radius: 0, fill: '#000', opacity: 0.5 },
-        { op: 'line', x1: 0, y1: 0, x2: 9, y2: 9, width: 1, color: '#00f' },
+        { op: 'line', x1: 0, y1: 0, x2: 9, y2: 9, width: 1, color: '#00f', opacity: 1 },
         TEXT_OP,
         {
           op: 'image',
