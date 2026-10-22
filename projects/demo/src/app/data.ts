@@ -65,15 +65,15 @@ const PRODUCTS = [
 ];
 
 const CUSTOMERS = [
-  'Padaria Pão Quente',
+  'Padaria Trigo Dourado Ltda',
   'Oficina Mecânica Rio Claro',
-  'Lanchonete Sabor Caseiro',
-  'Mercado Boa Esquina',
+  'Clínica Vida e Saúde',
+  'Mercearia Vila Nova',
   'Escritório Contábil Horizonte',
   'Transportadora Serra Azul',
-  'Farmácia Gota Certa',
+  'Clínica Bem Viver',
   'Construtora Pedra Forte',
-  'Escola Novo Caminho',
+  'Hotel Vista Alegre',
   'Distribuidora Sol Nascente',
 ];
 
