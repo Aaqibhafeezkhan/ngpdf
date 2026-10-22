@@ -114,34 +114,40 @@ const ALIGN = {
   'flex-end': 'ALIGN_FLEX_END',
 } as const;
 
+/**
+ * Sets the style on a fresh Yoga node. Each setter is a call into WebAssembly, so values equal
+ * to Yoga's defaults (column, stretch, auto sizes, no limits, zero edges) are skipped: a
+ * 1,000-row table makes hundreds of thousands of these calls otherwise.
+ */
 function applyStyle(yoga: Yoga, node: YogaNode, style: ResolvedStyle): void {
-  node.setFlexDirection(
-    style.flexDirection === 'row' ? yoga.FLEX_DIRECTION_ROW : yoga.FLEX_DIRECTION_COLUMN,
-  );
-  node.setFlexGrow(style.flexGrow);
+  if (style.flexDirection === 'row') node.setFlexDirection(yoga.FLEX_DIRECTION_ROW);
+  if (style.flexGrow !== 0) node.setFlexGrow(style.flexGrow);
   // Yoga's default is 0; CSS (and ResolvedStyle) default to 1.
-  node.setFlexShrink(style.flexShrink);
-  node.setFlexBasis(yogaLength(style.flexBasis));
-  node.setJustifyContent(yoga[JUSTIFY[style.justifyContent]]);
-  node.setAlignItems(yoga[ALIGN[style.alignItems]]);
-  node.setAlignSelf(yoga[ALIGN[style.alignSelf]]);
-  node.setGap(yoga.GUTTER_ALL, style.gap);
-  node.setWidth(yogaLength(style.width));
-  node.setHeight(yogaLength(style.height));
-  node.setMinWidth(yogaLimit(style.minWidth));
-  node.setMinHeight(yogaLimit(style.minHeight));
-  node.setMaxWidth(yogaLimit(style.maxWidth));
-  node.setMaxHeight(yogaLimit(style.maxHeight));
+  if (style.flexShrink !== 0) node.setFlexShrink(style.flexShrink);
+  if (style.flexBasis !== 'auto') node.setFlexBasis(yogaLength(style.flexBasis));
+  if (style.justifyContent !== 'flex-start') {
+    node.setJustifyContent(yoga[JUSTIFY[style.justifyContent]]);
+  }
+  if (style.alignItems !== 'stretch') node.setAlignItems(yoga[ALIGN[style.alignItems]]);
+  if (style.alignSelf !== 'auto') node.setAlignSelf(yoga[ALIGN[style.alignSelf]]);
+  if (style.gap !== 0) node.setGap(yoga.GUTTER_ALL, style.gap);
+  if (style.width !== 'auto') node.setWidth(yogaLength(style.width));
+  if (style.height !== 'auto') node.setHeight(yogaLength(style.height));
+  if (style.minWidth !== 'auto') node.setMinWidth(yogaLimit(style.minWidth));
+  if (style.minHeight !== 'auto') node.setMinHeight(yogaLimit(style.minHeight));
+  if (style.maxWidth !== 'auto') node.setMaxWidth(yogaLimit(style.maxWidth));
+  if (style.maxHeight !== 'auto') node.setMaxHeight(yogaLimit(style.maxHeight));
   applyEdges(yoga, style.margin, (edge, value) => {
-    node.setMargin(edge, yogaLength(value));
+    if (value !== 0) node.setMargin(edge, yogaLength(value));
   });
   applyEdges(yoga, style.padding, (edge, value) => {
-    node.setPadding(edge, yogaLimit(value));
+    if (value !== 0 && value !== 'auto') node.setPadding(edge, yogaLimit(value));
   });
-  node.setBorder(yoga.EDGE_TOP, style.borderWidth.top);
-  node.setBorder(yoga.EDGE_RIGHT, style.borderWidth.right);
-  node.setBorder(yoga.EDGE_BOTTOM, style.borderWidth.bottom);
-  node.setBorder(yoga.EDGE_LEFT, style.borderWidth.left);
+  const border = style.borderWidth;
+  if (border.top !== 0) node.setBorder(yoga.EDGE_TOP, border.top);
+  if (border.right !== 0) node.setBorder(yoga.EDGE_RIGHT, border.right);
+  if (border.bottom !== 0) node.setBorder(yoga.EDGE_BOTTOM, border.bottom);
+  if (border.left !== 0) node.setBorder(yoga.EDGE_LEFT, border.left);
 }
 
 function styleOf(styles: ReadonlyMap<PdfNode, ResolvedStyle>, node: PdfNode): ResolvedStyle {
