@@ -1,7 +1,8 @@
 import { Component, ElementRef, inject, input } from '@angular/core';
 import type { PdfNode } from '../tree/node';
+import type { TableColumn } from '../tree/table-column';
 
-export type TableColumn = number | `${number}fr` | `${number}%`;
+export type { TableColumn };
 
 @Component({
   selector: 'pdf-table',

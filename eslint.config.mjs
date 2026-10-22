@@ -117,6 +117,8 @@ export default tseslint.config(
           patterns: [
             {
               group: ['pdfkit', 'pdfkit/*', 'yoga-layout', 'yoga-layout/*'],
+              // Types are erased; only runtime imports would pull the library into a bundle.
+              allowTypeImports: true,
               message: 'Only engine/writer.ts and engine/index.ts import pdfkit and yoga-layout.',
             },
           ],
