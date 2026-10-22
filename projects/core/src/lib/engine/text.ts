@@ -62,43 +62,84 @@ export function layoutText(
   const spaceWidth = widthOf(' ');
 
   const lines: TextLine[] = [];
-  let current = '';
-  let currentWidth = 0; // sum of the parts, an upper bound of the kerned width
+  // The line being built: each part is a word and the separator (a space or nothing) before it.
+  interface Part {
+    readonly sep: string;
+    readonly word: string;
+    readonly width: number;
+  }
+  let parts: Part[] = [];
+  // Sum of the part widths. Kerning makes the drawn width differ, so it only guides the fit;
+  // `flush` checks the real width.
+  let sum = 0;
   let pendingSpace = false;
 
+  const add = (word: string, width: number): void => {
+    const sep = parts.length > 0 && pendingSpace ? ' ' : '';
+    parts.push({ sep, word, width });
+    sum += (sep === '' ? 0 : spaceWidth) + width;
+  };
+  const textOf = (): string => parts.map((part) => part.sep + part.word).join('');
+
+  /** Emits the line, moving trailing words to the next line while its drawn width overflows. */
   const flush = (): void => {
-    if (current === '') return;
-    lines.push({ text: current, width: widthOf(current), y: lines.length * lineHeight });
-    current = '';
-    currentWidth = 0;
+    if (parts.length === 0) return;
+    let lineText = textOf();
+    let lineWidth = widthOf(lineText);
+    const carried: Part[] = [];
+    while (lineWidth > maxWidth && parts.length > 1) {
+      carried.unshift(...parts.splice(-1));
+      lineText = textOf();
+      lineWidth = widthOf(lineText);
+    }
+    lines.push({ text: lineText, width: lineWidth, y: lines.length * lineHeight });
+    const spaceAfter = carried.length > 0 && pendingSpace;
+    parts = [];
+    sum = 0;
     pendingSpace = false;
+    for (const part of carried) {
+      pendingSpace = part.sep === ' ';
+      add(part.word, part.width);
+    }
+    pendingSpace = spaceAfter;
   };
 
   for (const { word, space } of collapsed === '' ? [] : pieces(collapsed)) {
     const wordWidth = widthOf(word);
     const gap = pendingSpace ? spaceWidth : 0;
-    if (current !== '' && currentWidth + gap + wordWidth > maxWidth) flush();
-    if (current === '' && wordWidth > maxWidth) {
-      // Split mid-word: fill the line with characters until the next one would overflow.
-      let chunk = '';
-      let chunkWidth = 0;
-      for (const char of word) {
-        const charWidth = widthOf(char);
-        if (chunk !== '' && chunkWidth + charWidth > maxWidth) {
-          current = chunk;
-          flush();
-          chunk = '';
-          chunkWidth = 0;
+    if (parts.length > 0 && sum + gap + wordWidth > maxWidth) flush();
+    if (parts.length === 0 && wordWidth > maxWidth) {
+      // Split mid-word. Characters are added by their summed widths, then the chunk's drawn
+      // width is checked and characters are given back until it fits.
+      const chars = Array.from(word);
+      let start = 0;
+      while (start < chars.length) {
+        // A piece can hold inner spaces (no break before some punctuation): a line never starts with one.
+        while (chars[start] === ' ') start++;
+        if (start >= chars.length) break;
+        let end = start;
+        let guess = 0;
+        for (; end < chars.length; end++) {
+          const charWidth = widthOf(String(chars[end]));
+          if (end > start && guess + charWidth > maxWidth) break;
+          guess += charWidth;
         }
-        chunk += char;
-        chunkWidth += charWidth;
+        let chunk: string;
+        let chunkWidth: number;
+        for (;;) {
+          while (end - start > 1 && chars[end - 1] === ' ') end--;
+          chunk = chars.slice(start, end).join('');
+          chunkWidth = widthOf(chunk);
+          if (chunkWidth <= maxWidth || end - start <= 1) break;
+          end--;
+        }
+        pendingSpace = false;
+        add(chunk, chunkWidth);
+        if (end < chars.length) flush();
+        start = end;
       }
-      current = chunk;
-      currentWidth = chunkWidth;
     } else {
-      const onLine = current !== '';
-      current += (onLine && pendingSpace ? ' ' : '') + word;
-      currentWidth += (onLine ? gap : 0) + wordWidth;
+      add(word, wordWidth);
     }
     pendingSpace = space;
   }

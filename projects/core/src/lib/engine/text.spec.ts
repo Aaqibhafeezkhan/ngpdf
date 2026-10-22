@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { ROOT_TEXT_STYLE, type TextStyle } from './style';
 import { layoutText, measureText } from './text';
-import { createPdfkitWriter, type PdfWriter } from './writer';
+import { createPdfkitWriter, type FontMetrics, type PdfWriter } from './writer';
 
 const MEASURE_MODE_UNDEFINED = 0;
 const MEASURE_MODE_AT_MOST = 2;
@@ -67,6 +67,47 @@ describe('layoutText', () => {
     const block = layoutText('abcdefghijklmnopqrstuvwxyz ok', style, 100, writer);
     expect(block.lines.map((line) => line.text).join('')).toContain('abcdefghijklmnopqrstuvwxyz');
     expect(block.lines.at(-1)?.text.endsWith('ok')).toBe(true);
+  });
+
+  it('keeps a split chunk within the box when kerning widens the joined text', () => {
+    // Summed per-character widths fit 12pt, but the drawn width of "_rt" at 10pt does not.
+    const tenPoint = { ...ROOT_TEXT_STYLE, fontSize: 10 };
+    const block = layoutText('_rt', tenPoint, 12, writer);
+    for (const line of block.lines) {
+      expect(writer.widthOf(line.text, 'Helvetica', 10)).toBeLessThanOrEqual(12);
+      expect(line.width).toBeLessThanOrEqual(12);
+    }
+    expect(block.lines.map((line) => line.text).join('')).toBe('_rt');
+  });
+
+  it('never starts or ends a line with a space when a piece holds an inner space', () => {
+    // No break is allowed between a space and a following full stop, so "ab ." is one piece.
+    const tenPoint = { ...ROOT_TEXT_STYLE, fontSize: 10 };
+    const block = layoutText('ab\t.', tenPoint, 12, writer);
+    expect(block.lines.map((line) => line.text)).toEqual(['ab', '.']);
+  });
+
+  it('moves trailing words to the next line when the drawn width overflows', () => {
+    // Metrics where "-b" kerns 6pt wider: "a-b" sums to 30pt but draws 36pt.
+    const kerning: FontMetrics = {
+      widthOf: (text) => 10 * text.length + (text.includes('-b') ? 6 : 0),
+      ascent: () => 0,
+    };
+    const block = layoutText('a-b c', style, 30, kerning);
+    expect(block.lines.map((line) => line.text)).toEqual(['a-', 'b c']);
+    for (const line of block.lines) expect(line.width).toBeLessThanOrEqual(30);
+  });
+
+  it('splits a 100,000-character unbreakable word in under 500 ms', () => {
+    const word = 'x'.repeat(100_000);
+    const timings: number[] = [];
+    for (let run = 0; run < 3; run++) {
+      const started = performance.now();
+      const block = layoutText(word, style, 30, writer);
+      timings.push(performance.now() - started);
+      expect(block.lines.every((line) => line.width <= 30)).toBe(true);
+    }
+    expect(Math.min(...timings)).toBeLessThan(500);
   });
 
   it('puts one character per line when the box is narrower than a character', () => {
