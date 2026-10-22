@@ -60,8 +60,8 @@ function page(
 }
 
 function paginate(root: PdfNode, warn = vi.fn<(message: string) => void>()): PageLayout[] {
-  const ctx: LayoutContext = { yoga, metrics: writer, images: new Map() };
-  return paginatePage(root, resolveStyles(root), ctx, warn);
+  const ctx: LayoutContext = { yoga, metrics: writer, images: new Map(), warn };
+  return paginatePage(root, resolveStyles(root), ctx);
 }
 
 function bottom(placed: PlacedBox): number {
@@ -161,6 +161,54 @@ describe('paginatePage: tables', () => {
     const placed = paginate(root)[0]!.placed;
     expect(placed.map((p) => p.box.node)).toEqual([header, first]);
     expect(placed[1]!.y).toBeCloseTo(CONTENT_TOP + 20, 6);
+  });
+
+  it('places a header taller than the content area once and paginates the rows without it', () => {
+    const header = row(900, true);
+    const rows = Array.from({ length: 50 }, () => row());
+    const warn = vi.fn<(message: string) => void>();
+    const root = page([el('pdf-table', {}, [header, ...rows], { columns: ['1fr'] }), pageNumber()]);
+    const pages = paginate(root, warn);
+    expect(pages[0]!.placed).toHaveLength(1);
+    expect(pages[0]!.placed[0]!.box.node).toBe(header);
+    expect(pages[0]!.placed[0]!.clipBottom).toBeCloseTo(CONTENT_BOTTOM, 6);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'ngpdf: pdf-row header is taller than a page and is cut at the bottom',
+    );
+    const placed = pages.slice(1).flatMap((p) => p.placed);
+    expect(placed.map((p) => p.box.node)).toEqual(rows);
+    expect(placed.every((p) => p.clipBottom === undefined)).toBe(true);
+  });
+
+  it('drops the header on a page whose row fits only without it', () => {
+    const header = row(100, true);
+    const rows = [row(700), row(700)];
+    const warn = vi.fn<(message: string) => void>();
+    const root = page([el('pdf-table', {}, [header, ...rows], { columns: ['1fr'] }), pageNumber()]);
+    const pages = paginate(root, warn);
+    expect(pages.map((p) => p.placed.map((placed) => placed.box.node))).toEqual([
+      [rows[0]],
+      [rows[1]],
+    ]);
+    expect(pages[1]!.placed[0]!.y).toBeCloseTo(CONTENT_TOP, 6);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('sends layout and pagination warnings to the same ctx.warn', () => {
+    const table = el(
+      'pdf-table',
+      {},
+      [el('pdf-row', { 'padding-left': '4', height: '20' }, [el('pdf-cell')])],
+      { columns: ['1fr'] },
+    );
+    const tall = el('pdf-view', { height: '2000', 'flex-direction': 'row' });
+    const warn = vi.fn<(message: string) => void>();
+    paginate(page([table, tall]), warn);
+    expect(warn.mock.calls.map(([message]) => message)).toEqual([
+      'ngpdf: ignored inside tables: pdf-row padding-left',
+      'ngpdf: pdf-view is taller than a page and is cut at the bottom',
+    ]);
   });
 
   it('stacks several header rows as one header', () => {
@@ -318,6 +366,20 @@ describe('paginatePage: page number', () => {
     expect(pages[0]!.pageNumber!.box.style.textAlign).toBe('center');
   });
 
+  it('keeps a text-align inherited from the page', () => {
+    const pages = paginate(page([pageNumber()], { padding: '36', 'text-align': 'center' }));
+    expect(pages[0]!.pageNumber!.box.style.textAlign).toBe('center');
+  });
+
+  it('warns about a pdf-page-number below a direct child and does not place it', () => {
+    const nested = pageNumber();
+    const warn = vi.fn<(message: string) => void>();
+    const pages = paginate(page([el('pdf-view', {}, [el('pdf-view', {}, [nested])])]), warn);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('ngpdf: pdf-page-number must be a direct child of pdf-page');
+    expect(pages[0]!.pageNumber).toBeUndefined();
+  });
+
   it('is the same on every page', () => {
     const pages = paginate(page([table(100), pageNumber()]));
     expect(pages.length).toBeGreaterThan(1);
@@ -356,6 +418,28 @@ describe('paginatePage: decorations', () => {
     // Page 1's piece ends at its last child, page 2's at the wrapper's padding and border.
     expect(first.y + first.box.h).toBeCloseTo(bottom(pages[0]!.placed.at(-1)!), 6);
     expect(second.y + second.box.h).toBeCloseTo(bottom(pages[1]!.placed.at(-1)!) + 11, 6);
+  });
+
+  it('extends a sliced outer piece below the inner wrappers that close on its page', () => {
+    const cards = Array.from({ length: 12 }, () =>
+      el('pdf-view', { padding: '10', 'border-width': '2', 'background-color': '#ddd' }, [
+        el('pdf-view', { height: '80' }),
+      ]),
+    );
+    const section = el('pdf-view', { 'background-color': '#eee', gap: '6' }, cards);
+    const pages = paginate(page([section, pageNumber()]));
+    expect(pages.length).toBeGreaterThan(1);
+    const [outer, ...inner] = pages[0]!.decorations;
+    expect(outer!.box.node).toBe(section);
+    expect(outer!.sliceBottom).toBe(true);
+    expect(inner.length).toBeGreaterThan(0);
+    for (const piece of inner) {
+      expect(outer!.y + outer!.box.h).toBeGreaterThanOrEqual(piece.y + piece.box.h - 1e-6);
+    }
+    // Page 1 ends with a whole card, so the section piece ends at its bottom border.
+    const lastCard = inner.at(-1)!;
+    expect(lastCard.sliceBottom).toBe(false);
+    expect(outer!.y + outer!.box.h).toBeCloseTo(lastCard.y + lastCard.box.h, 6);
   });
 
   it('keeps the padding of a wrapper that opens on a new page', () => {

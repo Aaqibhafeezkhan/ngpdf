@@ -108,8 +108,15 @@ function isWrapper(box: Box): boolean {
   );
 }
 
-/** Units in flow order, and the wrappers they came from in pre-order (outer first). */
-function collectUnits(content: Box): Collected {
+function isHeaderRow(node: PdfNode): boolean {
+  return propsOf(node)['header'] === true;
+}
+
+/**
+ * Units in flow order, and the wrappers they came from in pre-order (outer first). A header
+ * taller than `maxHeader` (the content area) is not repeated: its rows become plain units.
+ */
+function collectUnits(content: Box, maxHeader: number): Collected {
   const units: Unit[] = [];
   const wrappers: Wrapper[] = [];
 
@@ -123,7 +130,7 @@ function collectUnits(content: Box): Collected {
     let children = box.children;
     let childHeader = header;
     if (box.node.tag === 'pdf-table') {
-      const isHeader = (child: Box): boolean => propsOf(child.node)['header'] === true;
+      const isHeader = (child: Box): boolean => isHeaderRow(child.node);
       const body = children.filter((child) => !isHeader(child));
       // A table of header rows only has nothing to repeat over: its rows are plain units.
       if (body.length > 0 && body.length < children.length) {
@@ -132,13 +139,15 @@ function collectUnits(content: Box): Collected {
           .map((child) => ({ box: child, x: x + child.x, top: top + child.y }));
         const headerTop = Math.min(...rows.map((r) => r.top));
         const headerBottom = Math.max(...rows.map((r) => r.top + r.box.h));
-        childHeader = {
-          rows,
-          top: headerTop,
-          height: headerBottom - headerTop,
-          gap: box.style.gap,
-        };
-        children = body;
+        if (headerBottom - headerTop <= maxHeader + EPSILON) {
+          childHeader = {
+            rows,
+            top: headerTop,
+            height: headerBottom - headerTop,
+            gap: box.style.gap,
+          };
+          children = body;
+        }
       }
     }
     for (const child of children) visit(child, x + child.x, top + child.y, childHeader);
@@ -182,6 +191,21 @@ function frameOf(
   };
 }
 
+/** Whether the node or an ancestor sets `text-align`; the page number is right-aligned if not. */
+function setsTextAlign(node: PdfNode): boolean {
+  for (let current: PdfNode | null = node; current; current = current.parent) {
+    if (current.rawStyle['text-align'] !== undefined) return true;
+  }
+  return false;
+}
+
+/** Whether a pdf-page-number sits anywhere below the page's direct children. */
+function hasNestedPageNumber(page: PdfNode): boolean {
+  const below = (node: PdfNode): boolean =>
+    node.children.some((child) => isPageNumber(child) || below(child));
+  return page.children.some((child) => !isPageNumber(child) && below(child));
+}
+
 /** The page number box: content-wide, one line of its font high unless sized, right-aligned. */
 function measurePageNumber(
   node: PdfNode,
@@ -191,7 +215,7 @@ function measurePageNumber(
 ): Box {
   const laid = layoutBox(node, styles, width, ctx);
   let style = laid.style;
-  if (node.rawStyle['text-align'] === undefined) style = { ...style, textAlign: 'right' };
+  if (!setsTextAlign(node)) style = { ...style, textAlign: 'right' };
   let h = laid.h;
   if (style.height === 'auto') {
     const insets =
@@ -237,13 +261,14 @@ export function paginatePage(
   page: PdfNode,
   styles: ReadonlyMap<PdfNode, ResolvedStyle>,
   ctx: LayoutContext,
-  warn: (message: string) => void,
 ): PageLayout[] {
+  const warn = (message: string): void => ctx.warn?.(message);
   const pageStyle = styles.get(page);
   if (!pageStyle) throw new Error('ngpdf: no resolved style for <pdf-page>');
   const base = frameOf(page, pageStyle);
 
   const numberNode = page.children.find(isPageNumber);
+  if (hasNestedPageNumber(page)) warn('ngpdf: pdf-page-number must be a direct child of pdf-page');
   const numberBox = numberNode
     ? measurePageNumber(numberNode, styles, base.contentWidth, ctx)
     : undefined;
@@ -271,7 +296,8 @@ export function paginatePage(
   };
   const contentStyles = new Map(styles).set(content, contentStyle);
   const laid = layoutBox(content, contentStyles, frame.contentWidth, ctx);
-  const { units, wrappers } = collectUnits(laid);
+  const contentHeight = frame.bottom - frame.top;
+  const { units, wrappers } = collectUnits(laid, contentHeight);
 
   // Per unit: the outermost wrapper top opening at it, the outermost wrapper bottom closing at
   // it, and whether any of them asks for a page break.
@@ -300,7 +326,8 @@ export function paginatePage(
 
   const place = (box: Box, x: number, y: number): void => {
     if (y + box.h > frame.bottom + EPSILON) {
-      warn(`ngpdf: ${box.node.tag} is taller than a page and is cut at the bottom`);
+      const what = isHeaderRow(box.node) ? `${box.node.tag} header` : box.node.tag;
+      warn(`ngpdf: ${what} is taller than a page and is cut at the bottom`);
       current.placed.push({ box, x, y, clipBottom: frame.bottom });
     } else {
       current.placed.push({ box, x, y });
@@ -314,6 +341,17 @@ export function paginatePage(
     }
     const plan = () => {
       const header = unit.header && !current.headers.has(unit.header) ? unit.header : null;
+      // A row that fits a page only without the header goes on its own page, at the top, without it.
+      if (
+        header &&
+        current.units === 0 &&
+        header.height + header.gap + unit.box.h > contentHeight + EPSILON &&
+        unit.box.h <= contentHeight + EPSILON
+      ) {
+        // The rest of the page continues the table without a header.
+        current.headers.add(header);
+        return { header: null, leadFlow: unit.top, leadTop: cursor, top: cursor };
+      }
       const leadFlow = header ? Math.min(header.top, unit.top) : unit.top;
       const anchor = previousBottom ?? opensAt.get(index) ?? leadFlow;
       const leadTop = cursor + leadFlow - anchor;
@@ -365,9 +403,11 @@ export function paginatePage(
     const last = at(placements, wrapper.last);
     for (let p = first.page; p <= last.page; p++) {
       const built = at(pages, p);
-      const top = p === first.page ? wrapper.top + first.leadShift : frame.top;
+      const top = p === first.page ? Math.max(frame.top, wrapper.top + first.leadShift) : frame.top;
       const lastHere = p === last.page ? last : at(placements, built.lastUnit);
-      const end = p === last.page ? wrapper.bottom : lastHere.unit.bottom;
+      // On a cut, the piece still covers the wrappers nested in it that close on this page.
+      const end =
+        p === last.page ? wrapper.bottom : (closesAt.get(built.lastUnit) ?? lastHere.unit.bottom);
       const bottom = Math.min(end + lastHere.unitShift, frame.bottom);
       built.decorations.push({
         box: { ...wrapper.box, h: Math.max(0, bottom - top), children: [] },

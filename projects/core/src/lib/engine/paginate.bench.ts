@@ -50,9 +50,7 @@ const writer = await createPdfkitWriter({ compress: false });
 
 test('lays out and paginates a 1,000-row table', async ({ bench }) => {
   const result = await bench('paginate 1,000 rows', () => {
-    paginatePage(page, resolveStyles(page), { yoga, metrics: writer, images: new Map() }, () => {
-      // Warnings are not part of the measurement.
-    });
+    paginatePage(page, resolveStyles(page), { yoga, metrics: writer, images: new Map() });
   }).run();
   // The 20% regression check against BASELINE_MEDIAN_MS runs weekly; here only the target holds.
   expect(result.latency.p50).toBeLessThan(300);

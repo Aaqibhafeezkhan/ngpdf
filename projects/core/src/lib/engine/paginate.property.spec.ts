@@ -15,6 +15,7 @@ beforeAll(async () => {
 });
 
 const CONTENT_BOTTOM = 841.89 - 36 - 9;
+const CONTENT_HEIGHT = CONTENT_BOTTOM - 36;
 
 function el(tag: string, style: Record<string, string>, props: Record<string, unknown> = {}) {
   const node = createNode('element', tag);
@@ -56,12 +57,12 @@ describe('paginatePage properties', () => {
             el('pdf-page-number', { height: '9' }),
           ]);
           const warnings: string[] = [];
-          const pages = paginatePage(
-            page,
-            resolveStyles(page),
-            { yoga, metrics: writer, images: new Map() },
-            (message) => warnings.push(message),
-          );
+          const pages = paginatePage(page, resolveStyles(page), {
+            yoga,
+            metrics: writer,
+            images: new Map(),
+            warn: (message) => warnings.push(message),
+          });
 
           expect(pages.length).toBeGreaterThanOrEqual(1);
           const isRow = new Set(rows);
@@ -81,8 +82,20 @@ describe('paginatePage properties', () => {
                 expect(placed.clipBottom).toBeCloseTo(CONTENT_BOTTOM, 6);
               }
             }
-            const hasRow = laid.placed.some((placed) => isRow.has(placed.box.node));
-            if (header && hasRow) expect(laid.placed[0]!.box.node).toBe(header);
+            const pageRows = laid.placed.filter((placed) => isRow.has(placed.box.node));
+            const nodes = laid.placed.map((placed) => placed.box.node);
+            if (header && pageRows.length > 0) {
+              if (nodes[0] === header) {
+                // The header once, then only rows.
+                expect(nodes.filter((node) => node === header)).toHaveLength(1);
+                expect(pageRows).toHaveLength(nodes.length - 1);
+              } else {
+                // Skipped only when the page's first row fits a page without it and not with it.
+                expect(pageRows).toHaveLength(nodes.length);
+                expect(headerHeight! + pageRows[0]!.box.h).toBeGreaterThan(CONTENT_HEIGHT);
+                expect(pageRows[0]!.box.h).toBeLessThanOrEqual(CONTENT_HEIGHT + 1e-6);
+              }
+            }
           }
           expect(warnings).toHaveLength(clipped);
           if (header && rows.length === 0) {
