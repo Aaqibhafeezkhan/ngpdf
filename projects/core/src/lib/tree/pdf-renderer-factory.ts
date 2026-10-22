@@ -1,0 +1,122 @@
+import { type Renderer2, type RendererFactory2 } from '@angular/core';
+import { createNode, type PdfNode } from './node';
+
+const toKebab = (name: string): string =>
+  name.startsWith('--') ? name : name.replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
+
+function parseStyle(source: string): Record<string, string> {
+  const style: Record<string, string> = {};
+  for (const declaration of source.split(';')) {
+    const colon = declaration.indexOf(':');
+    if (colon < 0) continue;
+    const name = declaration.slice(0, colon).trim();
+    if (name) style[toKebab(name)] = declaration.slice(colon + 1).trim();
+  }
+  return style;
+}
+
+function detach(node: PdfNode): void {
+  if (!node.parent) return;
+  const siblings = node.parent.children;
+  const at = siblings.indexOf(node);
+  if (at >= 0) siblings.splice(at, 1);
+  node.parent = null;
+}
+
+/** Adapter: turns Angular's Renderer2 calls into a PdfNode tree. */
+class PdfRenderer implements Renderer2 {
+  readonly data: Record<string, unknown> = {};
+  destroyNode = null;
+
+  destroy(): void {
+    // Nothing to release: the tree is plain data.
+  }
+
+  createElement(name: string): PdfNode {
+    return createNode('element', name);
+  }
+
+  createComment(): PdfNode {
+    return createNode('comment');
+  }
+
+  createText(value: string): PdfNode {
+    return createNode('text', '', value);
+  }
+
+  appendChild(parent: PdfNode, newChild: PdfNode): void {
+    detach(newChild);
+    newChild.parent = parent;
+    parent.children.push(newChild);
+  }
+
+  insertBefore(parent: PdfNode, newChild: PdfNode, refChild: PdfNode | null): void {
+    detach(newChild);
+    const at = refChild ? parent.children.indexOf(refChild) : -1;
+    newChild.parent = parent;
+    if (at < 0) parent.children.push(newChild);
+    else parent.children.splice(at, 0, newChild);
+  }
+
+  removeChild(parent: PdfNode | null, oldChild: PdfNode): void {
+    if (oldChild.parent === (parent ?? oldChild.parent)) detach(oldChild);
+  }
+
+  selectRootElement(): PdfNode {
+    return createNode('element', 'root');
+  }
+
+  parentNode(node: PdfNode): PdfNode | null {
+    return node.parent;
+  }
+
+  nextSibling(node: PdfNode): PdfNode | null {
+    if (!node.parent) return null;
+    return node.parent.children[node.parent.children.indexOf(node) + 1] ?? null;
+  }
+
+  setAttribute(el: PdfNode, name: string, value: string): void {
+    if (name === 'style') el.rawStyle = parseStyle(value);
+  }
+
+  removeAttribute(el: PdfNode, name: string): void {
+    if (name === 'style') el.rawStyle = {};
+  }
+
+  addClass(): void {
+    // Classes mean nothing in a PDF.
+  }
+
+  removeClass(): void {
+    // Classes mean nothing in a PDF.
+  }
+
+  setStyle(el: PdfNode, style: string, value: unknown): void {
+    el.rawStyle[toKebab(style)] = String(value);
+  }
+
+  removeStyle(el: PdfNode, style: string): void {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete el.rawStyle[toKebab(style)];
+  }
+
+  setProperty(): void {
+    // Element data comes from the owner component.
+  }
+
+  setValue(node: PdfNode, value: string): void {
+    node.text = value;
+  }
+
+  listen(): () => void {
+    return () => undefined;
+  }
+}
+
+export class PdfRendererFactory implements RendererFactory2 {
+  private readonly renderer = new PdfRenderer();
+
+  createRenderer(): Renderer2 {
+    return this.renderer;
+  }
+}
