@@ -60,7 +60,7 @@ function infoOf(document: PdfNode, now: Date): DocumentInfo {
     ...(title !== undefined && { title }),
     ...(author !== undefined && { author }),
     ...(subject !== undefined && { subject }),
-    ...(Array.isArray(keywords) && { keywords: keywords as string[] }),
+    ...(Array.isArray(keywords) && { keywords: keywords as readonly string[] }),
     creationDate: date instanceof Date ? date : now,
   };
 }

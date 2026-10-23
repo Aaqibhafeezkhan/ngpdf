@@ -9,7 +9,7 @@ export type { TableColumn };
   template: '<ng-content />',
 })
 export class PdfTable {
-  readonly columns = input.required<TableColumn[]>();
+  readonly columns = input.required<readonly TableColumn[]>();
 
   constructor() {
     (inject(ElementRef).nativeElement as PdfNode).owner = this;

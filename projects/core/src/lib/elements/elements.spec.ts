@@ -8,10 +8,11 @@ import {
   createEnvironmentInjector,
 } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { elementChildren, propsOf, type PdfNode } from '../tree/node';
 import { PdfRendererFactory } from '../tree/pdf-renderer-factory';
-import { PDF_ELEMENTS } from '.';
+import { PDF_ELEMENTS, type PdfDocument, type PdfTable, type TableColumn } from '.';
+import type { PageSize } from './page';
 
 @Component({
   selector: 'pdf-test-defaults',
@@ -129,5 +130,14 @@ describe('pdf-* elements', () => {
     const row = at(elementChildren(table), 0);
     expect(propsOf(row)['header']).toBe(true);
     expect(propsOf(at(elementChildren(row), 0))).toEqual({ span: 2 });
+  });
+});
+
+describe('element input types', () => {
+  it('accept readonly arrays, as an `as const` or a readonly field gives them', () => {
+    // Checked by the typecheck (tsc over the specs); the call itself does nothing at runtime.
+    expectTypeOf<readonly TableColumn[]>().toExtend<ReturnType<PdfTable['columns']>>();
+    expectTypeOf<readonly [number, number]>().toExtend<PageSize>();
+    expectTypeOf<readonly string[]>().toExtend<ReturnType<PdfDocument['keywords']>>();
   });
 });

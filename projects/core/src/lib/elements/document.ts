@@ -9,7 +9,7 @@ export class PdfDocument {
   readonly title = input<string>();
   readonly author = input<string>();
   readonly subject = input<string>();
-  readonly keywords = input<string[]>();
+  readonly keywords = input<readonly string[]>();
   readonly creationDate = input<Date>();
 
   constructor() {

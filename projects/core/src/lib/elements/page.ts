@@ -1,7 +1,7 @@
 import { Component, ElementRef, inject, input } from '@angular/core';
 import type { PdfNode } from '../tree/node';
 
-export type PageSize = 'A3' | 'A4' | 'A5' | 'Letter' | 'Legal' | [number, number];
+export type PageSize = 'A3' | 'A4' | 'A5' | 'Letter' | 'Legal' | readonly [number, number];
 export type PageOrientation = 'portrait' | 'landscape';
 
 @Component({
