@@ -147,6 +147,18 @@ describe('loadImages', () => {
     ).rejects.toThrow('ngpdf: could not load image "/missing.png": HTTP 404');
   });
 
+  it('leaves the query string and fragment out of the error, as they often hold a token', async () => {
+    const fetchFn = vi.fn(() => Promise.resolve(new Response('no', { status: 403 })));
+    const load = (src: string) => loadImages(root(imageNode(src)), writer, fetchFn);
+    await expect(load('https://cdn.example.com/a.png?token=secret#top')).rejects.toThrow(
+      /^ngpdf: could not load image "https:\/\/cdn\.example\.com\/a\.png": HTTP 403$/,
+    );
+    await expect(load('/b.png#x?y')).rejects.toThrow(/^ngpdf: could not load image "\/b\.png": /);
+    expect(fetchFn).toHaveBeenCalledWith('https://cdn.example.com/a.png?token=secret#top', {
+      credentials: 'same-origin',
+    });
+  });
+
   it('rejects a failed fetch with the reason', async () => {
     const fetchFn = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
     await expect(

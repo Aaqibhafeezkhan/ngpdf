@@ -37,6 +37,12 @@ function decodeDataUrl(src: string): Uint8Array {
   return percentDecode(payload);
 }
 
+/** The URL without its query string and fragment, which often carry a token, for messages. */
+function withoutQuery(url: string): string {
+  const cuts = [url.indexOf('?'), url.indexOf('#')].filter((at) => at >= 0);
+  return cuts.length > 0 ? url.slice(0, Math.min(...cuts)) : url;
+}
+
 async function fetchBytes(url: string, fetchFn: typeof fetch): Promise<Uint8Array> {
   const response = await fetchFn(url, { credentials: 'same-origin' });
   if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
@@ -54,7 +60,7 @@ async function loadOne(
     label = 'data URL';
     read = () => decodeDataUrl(src);
   } else if (typeof src === 'string') {
-    label = src;
+    label = withoutQuery(src);
     read = () => fetchBytes(src, fetchFn ?? ((...args) => fetch(...args)));
   } else if (src instanceof Blob) {
     label = 'Blob';
