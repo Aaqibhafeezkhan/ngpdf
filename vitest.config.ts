@@ -6,8 +6,9 @@ export default defineConfig({
   plugins: [angular({ tsconfig: 'projects/core/tsconfig.spec.json' })],
   test: {
     environment: 'node',
+    exclude: ['**/node_modules/**', '**/dist/**', '.stryker-tmp/**'],
     setupFiles: ['projects/core/src/testing/setup.ts'],
-    include: ['projects/core/src/**/*.spec.ts'],
+    include: ['projects/core/src/**/*.spec.ts', 'scripts/**/*.spec.mjs'],
     coverage: {
       provider: 'v8',
       include: ['projects/core/src/lib/**/*.ts'],

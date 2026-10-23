@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Runs a command in a capped Node 24 container with the repo mounted at /w.
+# StrykerJS kills process trees with `ps`, which the slim image lacks: use NGPDF_IMAGE=node:24-bookworm for it.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tty_flags=()
@@ -8,4 +9,4 @@ exec docker run --rm -i "${tty_flags[@]}" \
   -u 1000:1000 -m 6g --memory-swap 6g \
   -e HOME=/tmp -e NPM_CONFIG_UPDATE_NOTIFIER=false -e CI="${CI:-}" \
   -v "$root":/w -w /w \
-  node:24-bookworm-slim "$@"
+  "${NGPDF_IMAGE:-node:24-bookworm-slim}" "$@"

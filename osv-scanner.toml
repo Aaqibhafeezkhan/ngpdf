@@ -1,0 +1,8 @@
+# OSV-Scanner configuration. Keep this list empty unless an advisory cannot reach ngpdf.
+# `node scripts/check-osv-ignores.mjs` runs in CI and fails an entry that has no `reason`, no
+# `ignoreUntil`, or an `ignoreUntil` more than 90 days ahead. Shape of an ignore:
+#
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# ignoreUntil = 2026-12-31
+# reason = "The vulnerable function is never called by ngpdf; explain why it is unreachable."

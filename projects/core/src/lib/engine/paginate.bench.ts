@@ -52,6 +52,9 @@ test('lays out and paginates a 1,000-row table', async ({ bench }) => {
   const result = await bench('paginate 1,000 rows', () => {
     paginatePage(page, resolveStyles(page), { yoga, metrics: writer, images: new Map() });
   }).run();
-  // The 20% regression check against BASELINE_MEDIAN_MS runs weekly; here only the target holds.
   expect(result.latency.p50).toBeLessThan(300);
+  // The weekly workflow sets BENCH_BASELINE_TOLERANCE=0.2 to fail on a regression of more than 20%.
+  const tolerance = Number(process.env['BENCH_BASELINE_TOLERANCE']);
+  if (tolerance > 0)
+    expect(result.latency.p50).toBeLessThanOrEqual(BASELINE_MEDIAN_MS * (1 + tolerance));
 });

@@ -22,7 +22,7 @@ export default tseslint.config(
     processor: angular.processInlineTemplates,
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ['vitest.config.ts'] },
+        projectService: { allowDefaultProject: ['vitest.config.ts', 'vitest.stryker.config.ts'] },
         tsconfigRootDir: import.meta.dirname,
       },
     },
