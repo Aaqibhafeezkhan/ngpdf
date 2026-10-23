@@ -135,6 +135,29 @@ export default tseslint.config(
     },
   },
   {
+    // @angular/common is not a peer dependency: the published library must not import it.
+    files: [`${lib}/**/*.ts`],
+    ignores: [`${lib}/**/*.spec.ts`, `${lib}/engine/writer.ts`, `${lib}/engine/index.ts`],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['pdfkit', 'pdfkit/*', 'yoga-layout', 'yoga-layout/*'],
+              allowTypeImports: true,
+              message: 'Only engine/writer.ts and engine/index.ts import pdfkit and yoga-layout.',
+            },
+            {
+              group: ['@angular/common', '@angular/common/*'],
+              message: '@ngpdf/core peers on @angular/core only.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.mjs', '**/*.js'],
     extends: [eslint.configs.recommended, tseslint.configs.disableTypeChecked],
     languageOptions: { globals: globals.node },

@@ -15,7 +15,7 @@ at most 15 KB gzipped to your initial bundle.
 npm install @ngpdf/core
 ```
 
-It needs `@angular/core` and `@angular/common` 22 or newer, and works zoneless and with zone.js.
+It needs `@angular/core` 22 or newer (`@Service` landed in 22.0), and works zoneless and with zone.js.
 
 ## Example: a communicators list
 
