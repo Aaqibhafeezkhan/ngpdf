@@ -64,7 +64,10 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       # Lays out and paginates a 1,000-row table. Fails when the median is more than 20 % above
-      # BASELINE_MEDIAN_MS in projects/core/src/lib/engine/paginate.bench.ts.
+      # BASELINE_MEDIAN_MS in projects/core/src/lib/engine/paginate.bench.ts. That baseline was
+      # measured on the maintainer's machine, so the first weekly run on a GitHub runner is a
+      # calibration: if it fails on speed alone, re-record BASELINE_MEDIAN_MS from this job's
+      # median (or from `./scripts/dev npx vitest bench --run paginate`) and commit it.
       - run: npx vitest bench --run paginate
         env:
           BENCH_BASELINE_TOLERANCE: '0.2'

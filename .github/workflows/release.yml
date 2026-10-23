@@ -34,37 +34,47 @@ jobs:
           title: 'chore: version packages'
           commit: 'chore: version packages'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A pull request opened with GITHUB_TOKEN triggers no workflows, so the required checks
+          # would never run on it. RELEASE_BOT_TOKEN (a GitHub App installation token or a
+          # fine-grained PAT with contents and pull-requests write) fixes that. This is the only
+          # job that sees the secret. See "Repository setup (maintainer)" in CONTRIBUTING.md.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
 
-  # Read-only: decides whether this push is a release. It is when no changeset is pending (the
-  # "Version Packages" pull request consumed them) and the version is not on npm yet.
+  # Read-only: decides what this push has to do. Nothing happens while a changeset is pending or
+  # the version is 0.0.0. Otherwise npm is published when the version is not on npm, and the
+  # GitHub release is created when it does not exist. They are separate decisions, so a rerun
+  # after a partial failure finishes the missing half.
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
       publish: ${{ steps.version.outputs.publish }}
+      release: ${{ steps.version.outputs.release }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="$(node -p "require('./projects/core/package.json').version")"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          publish=false
+          release=false
           pending="$(find .changeset -maxdepth 1 -name '*.md' ! -name README.md | wc -l)"
-          if [ "${pending}" -gt 0 ]; then
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          elif npm view "@ngpdf/core@${version}" version >/dev/null 2>&1; then
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
+          if [ "${pending}" -eq 0 ] && [ "${version}" != "0.0.0" ]; then
+            npm view "@ngpdf/core@${version}" version >/dev/null 2>&1 || publish=true
+            gh release view "v${version}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 || release=true
           fi
+          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+          echo "release=${release}" >> "$GITHUB_OUTPUT"
 
   # Builds without any write permission, so the publish job runs no build tooling.
   build:
     needs: check
-    if: needs.check.outputs.publish == 'true'
+    if: needs.check.outputs.publish == 'true' || needs.check.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -92,10 +102,11 @@ jobs:
   # There is no NPM_TOKEN. It runs no repository code except `npm publish`.
   publish:
     needs: [check, build]
+    if: needs.check.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -111,8 +122,23 @@ jobs:
           printf '11.5.1\n%s\n' "$(npm --version)" | sort -V -C
       - run: npm publish --provenance --access public
         working-directory: dist/core
-      - name: GitHub release with the SBOM
-        run: gh release create "v${VERSION}" sbom.cdx.json --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "v${VERSION}" --generate-notes
+
+  # Creates the GitHub release with the SBOM. It runs when npm was published now or earlier, and
+  # also when only this step failed on a previous run.
+  github-release:
+    needs: [check, build, publish]
+    if: >-
+      !cancelled() && needs.check.outputs.release == 'true' && needs.build.result == 'success'
+      && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - run: gh release create "v${VERSION}" sbom.cdx.json --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "v${VERSION}" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
