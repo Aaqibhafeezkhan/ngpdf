@@ -6,7 +6,8 @@ import { createPdfkitWriter } from './writer';
 
 /**
  * Median of `vitest bench` on this file in `./scripts/dev` (Node 24), recorded 2026-10-22.
- * The weekly CI job fails when the median is more than 20% above it. Target: under 300 ms.
+ * The weekly CI job fails when the median is more than 20% above it. The local target is under
+ * 300 ms, which vitest bench prints but does not assert.
  * It was measured on the maintainer's machine, so the first weekly run on a GitHub runner is a
  * calibration: if that run fails on speed alone, record the median it prints here and commit it.
  */
@@ -54,8 +55,9 @@ test('lays out and paginates a 1,000-row table', async ({ bench }) => {
   const result = await bench('paginate 1,000 rows', () => {
     paginatePage(page, resolveStyles(page), { yoga, metrics: writer, images: new Map() });
   }).run();
-  expect(result.latency.p50).toBeLessThan(300);
-  // The weekly workflow sets BENCH_BASELINE_TOLERANCE=0.2 to fail on a regression of more than 20%.
+  // Only the baseline check gates: the weekly workflow sets BENCH_BASELINE_TOLERANCE=0.2 to fail
+  // on a regression of more than 20%. The 300 ms target is for a local run, and is not asserted
+  // because a shared CI runner's speed varies more than the code does.
   const tolerance = Number(process.env['BENCH_BASELINE_TOLERANCE']);
   if (tolerance > 0)
     expect(result.latency.p50).toBeLessThanOrEqual(BASELINE_MEDIAN_MS * (1 + tolerance));
