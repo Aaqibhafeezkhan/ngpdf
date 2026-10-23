@@ -14,6 +14,7 @@ Where the simplest correct answer is no pattern, this file says so.
  PdfNode tree ── owner.pdfProps(), rawStyle
         │  ─ ─ ─ ─ ─ ─ dynamic import('../engine') ─ ─ ─ ─ ─ ─
         ▼                                 lazy half: engine/
+ dissolveHosts      → PdfNode tree of pdf-* elements only
  resolveStyles      → Map<PdfNode, ResolvedStyle>
  loadImages         → Map<PdfNode, ImageAsset>          (the only async I/O)
  layoutBox (Yoga)   → Box tree
@@ -119,6 +120,18 @@ invalidation would buy nothing here.
 - **Failure case.** If the chunk fails to load (offline), the promise is cleared and the next
   render tries again.
 
+### Component hosts: dissolved once, before the stages
+
+- **Context.** A document is split into components like any Angular template, so a
+  `pdf-page`, `pdf-row` or `pdf-cell` often sits inside a user component's host element. Every
+  stage that collects children (pages, rows, cells, pagination units, layout) would otherwise
+  have to look through hosts.
+- **Decision.** `dissolveHosts` copies the document's tree with every element that is not one of
+  the nine `pdf-*` elements replaced by its children, like CSS `display: contents`. A host's
+  own style is ignored, with one dev-mode warning per tag. The stages after it never see a host.
+- **Alternative.** Teaching each stage to skip hosts. It loses because five places would each
+  need the same rule, and missing one gives a silent wrong layout.
+
 ### Trees: plain data with explicit traversal, no Composite classes
 
 - **Context.** `PdfNode` and `Box` are trees, and every stage walks them.
@@ -177,7 +190,7 @@ direct code. Strategy would add indirection with one implementation each.
 projects/core/src/lib/tree/       PdfNode, PdfRendererFactory           (eager)
 projects/core/src/lib/elements/   pdf-* components, PDF_ELEMENTS        (eager)
 projects/core/src/lib/render/     render-tree, PdfRenderer facade       (eager)
-projects/core/src/lib/engine/     style, fonts, text, images, layout,
+projects/core/src/lib/engine/     hosts, color, style, fonts, text, images, layout,
                                   paginate, display-list, writer, index (lazy)
 projects/demo/                    the three reference documents
 scripts/                          dev (Docker), e2e, bundle budget

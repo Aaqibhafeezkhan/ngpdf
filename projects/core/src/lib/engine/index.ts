@@ -5,6 +5,7 @@
 /// <reference path="./linebreak.d.ts" />
 import { elementChildren, propsOf, type PdfNode } from '../tree/node';
 import { displayList } from './display-list';
+import { dissolveHosts } from './hosts';
 import { loadImages } from './images';
 import type { LayoutContext } from './layout';
 import { paginatePage } from './paginate';
@@ -93,11 +94,13 @@ export async function renderDocument(
     options.writer ?? createPdfkitWriter({ compress: true }),
   ]);
   try {
-    const styles = resolveStyles(root, warn);
-    const images = await loadImages(root, writer);
+    // Component hosts are transparent: the stages below see only pdf-* elements.
+    const tree = dissolveHosts(document, warn);
+    const styles = resolveStyles(tree, warn);
+    const images = await loadImages(tree, writer);
     const ctx: LayoutContext = { yoga, metrics: writer, images, warn, warnChars };
 
-    const layouts = elementChildren(document)
+    const layouts = elementChildren(tree)
       .filter((child) => child.tag === 'pdf-page')
       .flatMap((child) => paginatePage(child, styles, ctx));
     const pages: PageOps[] = layouts.map((layout, index) => ({
