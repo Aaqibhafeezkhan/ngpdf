@@ -1,9 +1,8 @@
 # Architecture
 
-How ngpdf is built, and why. The product rules are in `AGENTS.md`, and the v0.1 scope is in
-`docs/superpowers/specs/2026-10-22-v0.1-design.md`. This file covers the structure and the
-patterns. Each pattern below is used because a concrete pressure in this project calls for it.
-Where the simplest correct answer is no pattern, this file says so.
+How ngpdf is built, and why. The product rules and the v0.1 scope are in `AGENTS.md`. This file
+covers the structure and the patterns. Each pattern below is used because a concrete pressure in
+this project calls for it. Where the simplest correct answer is no pattern, this file says so.
 
 ## The shape: a pipeline over immutable data
 
@@ -194,5 +193,5 @@ projects/core/src/lib/engine/     hosts, color, style, fonts, text, images, layo
                                   paginate, display-list, writer, index (lazy)
 projects/demo/                    the three reference documents
 scripts/                          dev (Docker), e2e, bundle budget
-docs/                             this file, ENGINEERING.md, specs, plans
+docs/                             this file, ENGINEERING.md, roadmap
 ```

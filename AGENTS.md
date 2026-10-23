@@ -5,9 +5,10 @@ template uses the `pdf-*` elements; a custom `RendererFactory2` turns it into a 
 a lazily loaded engine lays that tree out with Yoga, breaks it into pages and writes it with
 pdfkit. Package `@ngpdf/core`, npm scope `@ngpdf`, GitHub `ngpdf/ngpdf`, MIT.
 
-The design is `docs/superpowers/specs/2026-10-22-v0.1-design.md`, the plan is
-`docs/superpowers/plans/2026-10-22-ngpdf-v0.1.md`, the structure and its patterns are in
-`docs/ARCHITECTURE.md`, and tests, lint, CI, security and releases are in `docs/ENGINEERING.md`.
+The structure and its patterns are in `docs/ARCHITECTURE.md`, tests, lint, CI, security and
+releases are in `docs/ENGINEERING.md`, and what comes next is in `docs/roadmap-v0.2.md`. Working
+design notes and implementation plans live in `docs/superpowers/`, which is gitignored and stays
+on the maintainer's machine.
 Read the ones your change touches before starting. A change that would
 break a rule below needs a different approach or an explicit decision from the maintainer, not an
 exception.

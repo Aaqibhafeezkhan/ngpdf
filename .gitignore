@@ -10,3 +10,4 @@ out-tsc/
 
 .stryker-tmp/
 reports/
+docs/superpowers/
