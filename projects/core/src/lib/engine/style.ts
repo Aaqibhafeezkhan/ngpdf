@@ -1,4 +1,7 @@
 import { createNode, propsOf, type PdfNode } from '../tree/node';
+import { parseColor, type Color } from './color';
+
+export type { Color };
 
 export type Length = number | { readonly percent: number } | 'auto';
 
@@ -10,7 +13,7 @@ export interface Edges<T> {
 }
 
 export interface TextStyle {
-  readonly color: string;
+  readonly color: Color;
   readonly fontFamily: 'Helvetica' | 'Times' | 'Courier';
   readonly fontSize: number;
   readonly fontWeight: 'normal' | 'bold';
@@ -42,9 +45,10 @@ export interface ResolvedStyle extends TextStyle {
   readonly margin: Edges<Length>;
   readonly padding: Edges<Length>;
   readonly borderWidth: Edges<number>;
-  readonly borderColor: Edges<string>;
+  readonly borderColor: Edges<Color>;
   readonly borderRadius: number;
-  readonly backgroundColor: string | null;
+  /** Null when nothing is painted, also for a fully transparent color. */
+  readonly backgroundColor: Color | null;
   readonly opacity: number;
   readonly objectFit: 'contain' | 'cover';
   readonly breakBefore: boolean;
@@ -58,15 +62,17 @@ export interface FlexParts {
 
 export interface BorderParts {
   readonly width: number;
-  readonly color: string;
+  readonly color: Color;
   /** A CSS border style other than solid or none; it is drawn solid. */
   readonly unsupportedStyle: string | null;
 }
 
 export const MAX_NESTING = 64;
 
+const BLACK: Color = Object.freeze({ r: 0, g: 0, b: 0, a: 1 });
+
 export const ROOT_TEXT_STYLE: TextStyle = Object.freeze({
-  color: '#000',
+  color: BLACK,
   fontFamily: 'Helvetica',
   fontSize: 10,
   fontWeight: 'normal',
@@ -202,7 +208,7 @@ export function parseEdges(value: string, tag?: string): Edges<Length> {
 /** `<width> <style> <color>` in any order; every part is optional. */
 export function parseBorder(value: string, tag?: string): BorderParts {
   let width: number | null = null;
-  let color: string | null = null;
+  let color: Color | null = null;
   let none = false;
   let unsupportedStyle: string | null = null;
   const tokens = tokenize(value);
@@ -215,10 +221,10 @@ export function parseBorder(value: string, tag?: string): BorderParts {
       if (token === 'none' || token === 'hidden') none = true;
       else if (token !== 'solid') unsupportedStyle = token;
     } else {
-      color = token;
+      color = parseColor(token, tag);
     }
   }
-  return { width: none ? 0 : (width ?? 1), color: color ?? '#000', unsupportedStyle };
+  return { width: none ? 0 : (width ?? 1), color: color ?? BLACK, unsupportedStyle };
 }
 
 /** `flex: <grow> [<shrink>] [<basis>]`, plus the `auto` and `none` keywords. */
@@ -303,7 +309,7 @@ function defaultStyle(node: PdfNode, inherited: TextStyle): Mutable<ResolvedStyl
     margin: allSides(0),
     padding: allSides(0),
     borderWidth: allSides(0),
-    borderColor: allSides('#000'),
+    borderColor: allSides(BLACK),
     borderRadius: 0,
     backgroundColor: null,
     opacity: 1,
@@ -312,8 +318,16 @@ function defaultStyle(node: PdfNode, inherited: TextStyle): Mutable<ResolvedStyl
   };
 }
 
-/** Applies one declaration. Returns false for a property this engine does not know. */
-function apply(style: Mutable<ResolvedStyle>, property: string, value: string, tag: string): void {
+type Warn = (message: string) => void;
+
+/** Applies one declaration; a property this engine does not know is ignored. */
+function apply(
+  style: Mutable<ResolvedStyle>,
+  property: string,
+  value: string,
+  tag: string,
+  warn: Warn,
+): void {
   const side = SIDES.find((s) => property.includes(`-${s}`));
   if (side && property.startsWith('margin-')) {
     style.margin = withSide(style.margin, side, parseLength(value, tag));
@@ -325,7 +339,7 @@ function apply(style: Mutable<ResolvedStyle>, property: string, value: string, t
   }
   if (side && property === `border-${side}`) {
     const border = parseBorder(value, tag);
-    warnBorder(border);
+    warnBorder(border, warn);
     style.borderWidth = withSide(style.borderWidth, side, border.width);
     style.borderColor = withSide(style.borderColor, side, border.color);
     return;
@@ -335,12 +349,12 @@ function apply(style: Mutable<ResolvedStyle>, property: string, value: string, t
     return;
   }
   if (side && property === `border-${side}-color`) {
-    style.borderColor = withSide(style.borderColor, side, value);
+    style.borderColor = withSide(style.borderColor, side, parseColor(value, tag));
     return;
   }
   switch (property) {
     case 'color':
-      style.color = value;
+      style.color = parseColor(value, tag);
       break;
     case 'font-family':
       style.fontFamily = fontFamilyOf(value);
@@ -432,7 +446,7 @@ function apply(style: Mutable<ResolvedStyle>, property: string, value: string, t
       break;
     case 'border': {
       const border = parseBorder(value, tag);
-      warnBorder(border);
+      warnBorder(border, warn);
       style.borderWidth = allSides(border.width);
       style.borderColor = allSides(border.color);
       break;
@@ -441,14 +455,16 @@ function apply(style: Mutable<ResolvedStyle>, property: string, value: string, t
       style.borderWidth = parseEdgeValues(value, (token) => parsePoints(token, tag), tag);
       break;
     case 'border-color':
-      style.borderColor = parseEdgeValues(value, (token) => token, tag);
+      style.borderColor = parseEdgeValues(value, (token) => parseColor(token, tag), tag);
       break;
     case 'border-radius':
       style.borderRadius = parsePoints(value, tag);
       break;
-    case 'background-color':
-      style.backgroundColor = value;
+    case 'background-color': {
+      const color = parseColor(value, tag);
+      style.backgroundColor = color.a > 0 ? color : null;
       break;
+    }
     case 'opacity':
       style.opacity = Math.min(1, Math.max(0, numberOf(value, property, tag)));
       break;
@@ -469,11 +485,9 @@ function numberOf(value: string, property: string, tag: string): number {
   return number;
 }
 
-function warnBorder(border: BorderParts): void {
+function warnBorder(border: BorderParts, warn: Warn): void {
   if (border.unsupportedStyle !== null) {
-    console.warn(
-      `ngpdf: border style "${border.unsupportedStyle}" is not supported; drawing solid`,
-    );
+    warn(`ngpdf: border style "${border.unsupportedStyle}" is not supported; drawing solid`);
   }
 }
 
@@ -487,12 +501,12 @@ function lineHeightOf(value: string, fontSize: number, tag: string): number {
   return fontSize > 0 ? length / fontSize : ROOT_TEXT_STYLE.lineHeight;
 }
 
-function resolveOne(node: PdfNode, inherited: TextStyle): ResolvedStyle {
+function resolveOne(node: PdfNode, inherited: TextStyle, warn: Warn): ResolvedStyle {
   const style = defaultStyle(node, inherited);
   let lineHeight: string | null = null;
   for (const [property, value] of Object.entries(node.rawStyle)) {
     if (property === 'line-height') lineHeight = value.trim();
-    else apply(style, property, value, node.tag);
+    else apply(style, property, value, node.tag, warn);
   }
   // Resolved last because a length depends on this element's own font size.
   if (lineHeight !== null && lineHeight !== 'normal') {
@@ -528,14 +542,20 @@ interface Pending {
   readonly inherited: TextStyle;
 }
 
-/** Resolves every element under `root`; text and comment nodes get no entry. */
-export function resolveStyles(root: PdfNode): Map<PdfNode, ResolvedStyle> {
+/**
+ * Resolves every element under `root`; text and comment nodes get no entry. Warnings (a border
+ * style drawn solid) go to `warn`, which the caller dedupes and prints in dev mode only.
+ */
+export function resolveStyles(
+  root: PdfNode,
+  warn: Warn = () => undefined,
+): Map<PdfNode, ResolvedStyle> {
   const result = new Map<PdfNode, ResolvedStyle>();
   if (root.kind !== 'element') return result;
   const stack: Pending[] = [{ node: root, depth: 1, inherited: ROOT_TEXT_STYLE }];
   for (let item = stack.pop(); item; item = stack.pop()) {
     if (item.depth > MAX_NESTING) fail(`nesting deeper than ${String(MAX_NESTING)}`);
-    const style = resolveOne(item.node, item.inherited);
+    const style = resolveOne(item.node, item.inherited, warn);
     result.set(item.node, style);
     const inherited = textPartOf(style);
     for (let i = item.node.children.length - 1; i >= 0; i--) {

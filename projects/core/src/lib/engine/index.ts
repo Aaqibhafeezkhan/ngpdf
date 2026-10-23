@@ -93,7 +93,7 @@ export async function renderDocument(
     options.writer ?? createPdfkitWriter({ compress: true }),
   ]);
   try {
-    const styles = resolveStyles(root);
+    const styles = resolveStyles(root, warn);
     const images = await loadImages(root, writer);
     const ctx: LayoutContext = { yoga, metrics: writer, images, warn, warnChars };
 

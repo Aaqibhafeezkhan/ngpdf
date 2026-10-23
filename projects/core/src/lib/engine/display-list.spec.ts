@@ -74,8 +74,40 @@ describe('displayList', () => {
     const root = page([el('pdf-view', { 'background-color': '#DD0031' }, [text('Hello')])]);
     const ops = list(layout(root)[0]!, 0, 1);
     expect(ops.map((op) => op.op)).toEqual(['rect', 'text']);
-    expect(ops[0]).toMatchObject({ op: 'rect', fill: '#DD0031', radius: 0, opacity: 1 });
+    expect(ops[0]).toMatchObject({ op: 'rect', fill: '#dd0031', radius: 0, opacity: 1 });
     expect(ops[1]).toMatchObject({ op: 'text', text: 'Hello', x: 36, y: 36 });
+  });
+
+  it('writes colors as #rrggbb and multiplies their alpha into the op opacity', () => {
+    const view = el(
+      'pdf-view',
+      {
+        'background-color': 'rgba(0, 0, 255, 0.5)',
+        'border-top': '2 solid #ff000080',
+        color: 'Red',
+        opacity: '0.5',
+      },
+      [text('Faded', { color: 'rgb(0 128 0 / 50%)' }), text('Plain')],
+    );
+    const ops = list(layout(page([view]))[0]!, 0, 1);
+    expect(only(ops, 'rect')[0]).toMatchObject({ fill: '#0000ff', opacity: 0.25 });
+    expect(only(ops, 'line')[0]).toMatchObject({ color: '#ff0000', opacity: 0.5 * (0x80 / 255) });
+    const [faded, plain] = only(ops, 'text');
+    expect(faded).toMatchObject({ text: 'Faded', color: '#008000', opacity: 0.25 });
+    expect(plain).toMatchObject({ text: 'Plain', color: '#ff0000', opacity: 0.5 });
+  });
+
+  it('paints nothing in a transparent color', () => {
+    const view = el(
+      'pdf-view',
+      { 'background-color': 'transparent', border: '1 solid transparent', height: '40' },
+      [text('Hidden', { color: 'transparent' }), text('Shown')],
+    );
+    const number = el('pdf-page-number', { color: 'rgba(0, 0, 0, 0)' });
+    const ops = list(layout(page([view, number]))[0]!, 0, 1);
+    expect(only(ops, 'rect')).toEqual([]);
+    expect(only(ops, 'line')).toEqual([]);
+    expect(only(ops, 'text').map((op) => op.text)).toEqual(['Shown']);
   });
 
   it('passes radius and opacity to the background rect', () => {
@@ -94,7 +126,7 @@ describe('displayList', () => {
     const ops = list(layout(page([el('pdf-view', style)]))[0]!, 0, 1);
     const lines = only(ops, 'line');
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatchObject({ y1: 37, y2: 37, width: 2, color: '#f00' });
+    expect(lines[0]).toMatchObject({ y1: 37, y2: 37, width: 2, color: '#ff0000' });
     expect(lines[1]).toMatchObject({ x1: 36.5, x2: 36.5, y1: 36, y2: 66, width: 1 });
   });
 
@@ -163,7 +195,7 @@ describe('displayList', () => {
   it('draws the page decoration before the units', () => {
     const root = page([text('x')], { padding: '36', 'background-color': '#eee' });
     const ops = list(layout(root)[0]!, 0, 1);
-    expect(ops[0]).toMatchObject({ op: 'rect', fill: '#eee', x: 0, y: 0, w: 595.28 });
+    expect(ops[0]).toMatchObject({ op: 'rect', fill: '#eeeeee', x: 0, y: 0, w: 595.28 });
   });
 
   describe('layout-resolved insets', () => {

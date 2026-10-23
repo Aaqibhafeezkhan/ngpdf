@@ -28,8 +28,8 @@ function el(
   return node;
 }
 
-function text(content: string): PdfNode {
-  const node = el('pdf-text');
+function text(content: string, style: Record<string, string> = {}): PdfNode {
+  const node = el('pdf-text', style);
   const run = createNode('text', '', content);
   run.parent = node;
   node.children.push(run);
@@ -204,6 +204,53 @@ describe('renderDocument', () => {
     expect(await render()).toBe(await render());
   });
 
+  describe('style fidelity', () => {
+    /** The body of an uncompressed PDF drawn by the real writer from one A4 page. */
+    async function bodyOf(children: PdfNode[]): Promise<string> {
+      const writer = await createPdfkitWriter({ compress: false });
+      const page = el('pdf-page', { padding: '36' }, children, { size: 'A4' });
+      const blob = await renderDocument(host({ creationDate: new Date(0) }, [page]), {
+        writer,
+        dev: false,
+      });
+      return bytesOf(blob);
+    }
+
+    // pdfkit sets colors with `/DeviceRGB cs` then `<r> <g> <b> scn` (fill) or `SCN` (stroke).
+    const operands = (body: string, operator: string): string[] =>
+      [...body.matchAll(new RegExp(`^([^\\n]*) ${operator}$`, 'gm'))].map((match) => match[1]!);
+    const fillOpacities = (body: string): string[] =>
+      [...body.matchAll(/^\/ca (\S+)$/gm)].map((match) => match[1]!);
+
+    it('writes rgb(), named, rgba() and 8-digit hex colors as their channels', async () => {
+      const body = await bodyOf([
+        el('pdf-view', { 'background-color': 'rgb(255, 0, 0)', height: '10' }),
+        el('pdf-view', { 'background-color': 'Navy', height: '10' }),
+        el('pdf-view', { 'border-top': '2 solid rgb(0 128 0)', height: '10' }),
+        text('Half', { color: 'rgba(0, 0, 255, 0.5)' }),
+        el('pdf-view', { 'background-color': '#ff000080', height: '10' }),
+      ]);
+      const half = String(128 / 255);
+      expect(operands(body, 'scn')).toEqual(['1 0 0', `0 0 ${half}`, '0 0 1', '1 0 0']);
+      expect(operands(body, 'SCN')).toEqual([`0 ${half} 0`]);
+      // The alpha becomes the fill opacity of the graphics state, never a channel.
+      expect(fillOpacities(body)).toEqual(expect.arrayContaining(['0.5', '0.501961']));
+    });
+
+    it('paints nothing for transparent', async () => {
+      const body = await bodyOf([
+        el('pdf-view', { 'background-color': 'transparent', border: '1 solid transparent' }, [
+          text('Hidden', { color: 'transparent' }),
+        ]),
+        text('Shown', { color: 'red' }),
+      ]);
+      expect(operands(body, 'scn')).toEqual(['1 0 0']);
+      expect(operands(body, 'SCN')).toEqual([]);
+      expect(body).not.toMatch(/ re$/m);
+      expect(body.match(/^BT$/gm)).toHaveLength(1);
+    });
+  });
+
   describe('warnings', () => {
     function tallPage(): PdfNode {
       const unit = (): PdfNode => el('pdf-view', { height: '1200' });
@@ -224,6 +271,23 @@ describe('renderDocument', () => {
       const writer = { ...recordingWriter(), write: () => Promise.reject(new Error('disk full')) };
       await expect(renderDocument(tallPage(), { writer, dev: true })).rejects.toThrow('disk full');
       expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('routes the border style warning through the render, once and only in dev mode', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const dashed = (): PdfNode =>
+        host({}, [
+          el('pdf-page', {}, [
+            el('pdf-view', { border: '1 dashed red' }),
+            el('pdf-view', { border: '1 dashed blue' }),
+          ]),
+        ]);
+      await renderDocument(dashed(), { writer: recordingWriter(), dev: false });
+      expect(warn).not.toHaveBeenCalled();
+      await renderDocument(dashed(), { writer: recordingWriter(), dev: true });
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        'ngpdf: border style "dashed" is not supported; drawing solid',
+      );
     });
 
     it('prints nothing when dev is false', async () => {

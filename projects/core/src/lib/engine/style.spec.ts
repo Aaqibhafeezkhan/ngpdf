@@ -12,9 +12,18 @@ function el(tag: string, rawStyle: Record<string, string> = {}, children: PdfNod
   return node;
 }
 
-function styleOf(rawStyle: Record<string, string>, tag = 'pdf-view') {
+const rgb = (r: number, g: number, b: number, a = 1) => ({ r, g, b, a });
+const BLACK = rgb(0, 0, 0);
+const RED = rgb(255, 0, 0);
+const BLUE = rgb(0, 0, 255);
+
+function styleOf(
+  rawStyle: Record<string, string>,
+  tag = 'pdf-view',
+  warn?: (message: string) => void,
+) {
   const node = el(tag, rawStyle);
-  const style = resolveStyles(el('pdf-document', {}, [node])).get(node);
+  const style = resolveStyles(el('pdf-document', {}, [node]), warn).get(node);
   if (!style) throw new Error('missing style');
   return style;
 }
@@ -51,7 +60,7 @@ describe('resolveStyles', () => {
     const style = styleOf({});
     expect(style).toMatchObject(ROOT_TEXT_STYLE);
     expect(ROOT_TEXT_STYLE).toEqual({
-      color: '#000',
+      color: BLACK,
       fontFamily: 'Helvetica',
       fontSize: 10,
       fontWeight: 'normal',
@@ -88,23 +97,36 @@ describe('resolveStyles', () => {
   it('sets only one side with border-bottom', () => {
     const style = styleOf({ 'border-bottom': '1 solid #ddd' });
     expect(style.borderWidth).toEqual({ top: 0, right: 0, bottom: 1, left: 0 });
-    expect(style.borderColor.bottom).toBe('#ddd');
-    expect(style.borderColor.top).toBe('#000');
+    expect(style.borderColor.bottom).toEqual(rgb(221, 221, 221));
+    expect(style.borderColor.top).toEqual(BLACK);
   });
 
   it('applies border to all sides and draws other styles solid', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const style = styleOf({ border: '2pt dashed red' });
+    const warn = vi.fn();
+    const style = styleOf({ border: '2pt dashed red' }, 'pdf-view', warn);
     expect(style.borderWidth).toEqual({ top: 2, right: 2, bottom: 2, left: 2 });
-    expect(style.borderColor.left).toBe('red');
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]?.[0])).toMatch(/^ngpdf:/);
+    expect(style.borderColor.left).toEqual(RED);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      'ngpdf: border style "dashed" is not supported; drawing solid',
+    );
+  });
+
+  it('sends the border style warning to the sink only, never to the console', () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    styleOf({ border: '2pt dashed red' });
+    styleOf({ border: '2pt dashed red' }, 'pdf-view', vi.fn());
+    expect(consoleWarn).not.toHaveBeenCalled();
   });
 
   it('expands border-width and border-color like margin', () => {
     const style = styleOf({ 'border-width': '1 2', 'border-color': 'red blue green' });
     expect(style.borderWidth).toEqual({ top: 1, right: 2, bottom: 1, left: 2 });
-    expect(style.borderColor).toEqual({ top: 'red', right: 'blue', bottom: 'green', left: 'blue' });
+    expect(style.borderColor).toEqual({
+      top: RED,
+      right: BLUE,
+      bottom: rgb(0, 128, 0),
+      left: BLUE,
+    });
     expect(() => styleOf({ 'border-width': '1 2 3 4 5' })).toThrow(/^ngpdf:/);
     expect(() => styleOf({ 'border-width': '2%' })).toThrow(/^ngpdf:/);
   });
@@ -115,17 +137,22 @@ describe('resolveStyles', () => {
     expect(width.borderWidth.left).toBeCloseTo(2.835, 3);
     expect(width.borderWidth.right).toBe(0);
     const color = styleOf({ 'border-right-color': 'blue', 'border-bottom-color': '#abc' });
-    expect(color.borderColor).toEqual({ top: '#000', right: 'blue', bottom: '#abc', left: '#000' });
+    expect(color.borderColor).toEqual({
+      top: BLACK,
+      right: BLUE,
+      bottom: rgb(170, 187, 204),
+      left: BLACK,
+    });
   });
 
   it('applies border declarations in order', () => {
     const later = styleOf({ border: '1 solid red', 'border-left-color': 'blue' });
-    expect(later.borderColor).toEqual({ top: 'red', right: 'red', bottom: 'red', left: 'blue' });
+    expect(later.borderColor).toEqual({ top: RED, right: RED, bottom: RED, left: BLUE });
     const earlier = styleOf({ 'border-left-color': 'blue', border: '1 solid red' });
-    expect(earlier.borderColor.left).toBe('red');
+    expect(earlier.borderColor.left).toEqual(RED);
     const widths = styleOf({ border: '1 solid red', 'border-width': '4' });
     expect(widths.borderWidth.top).toBe(4);
-    expect(widths.borderColor.top).toBe('red');
+    expect(widths.borderColor.top).toEqual(RED);
   });
 
   it('expands the flex shorthand', () => {
@@ -177,11 +204,11 @@ describe('resolveStyles', () => {
     const styles = resolveStyles(root);
 
     const rowText = row.children[0]!;
-    expect(styles.get(rowText)).toMatchObject({ color: 'white', fontWeight: 'bold' });
+    expect(styles.get(rowText)).toMatchObject({ color: rgb(255, 255, 255), fontWeight: 'bold' });
     expect(styles.get(rowText)?.backgroundColor).toBeNull();
     expect(styles.get(rowText)?.padding.top).toBe(0);
-    expect(styles.get(plain)).toMatchObject({ color: '#000', fontWeight: 'normal' });
-    expect(styles.get(white)).toMatchObject({ color: 'white', fontWeight: 'bold' });
+    expect(styles.get(plain)).toMatchObject({ color: BLACK, fontWeight: 'normal' });
+    expect(styles.get(white)).toMatchObject({ color: rgb(255, 255, 255), fontWeight: 'bold' });
   });
 
   it('inherits through an intermediate that does not set the property', () => {
@@ -253,7 +280,7 @@ describe('resolveStyles property coverage', () => {
       'text-decoration': 'line-through',
     });
     expect(style).toMatchObject({
-      color: '#336699',
+      color: rgb(51, 102, 153),
       fontSize: 14,
       fontWeight: 'bold',
       fontStyle: 'italic',
@@ -308,7 +335,7 @@ describe('resolveStyles property coverage', () => {
       12,
       'auto',
     ]);
-    expect(style.backgroundColor).toBe('#eee');
+    expect(style.backgroundColor).toEqual(rgb(238, 238, 238));
     expect(style.borderRadius).toBe(3);
     expect(style.objectFit).toBe('cover');
   });
@@ -379,29 +406,61 @@ describe('resolveStyles property coverage', () => {
   });
 
   it('parses border shorthand parts in any order and the none keyword', () => {
-    expect(styleOf({ border: 'red solid 3' }).borderColor.top).toBe('red');
+    expect(styleOf({ border: 'red solid 3' }).borderColor.top).toEqual(RED);
     expect(styleOf({ border: 'red solid 3' }).borderWidth.top).toBe(3);
     expect(styleOf({ border: 'solid' }).borderWidth.top).toBe(1);
-    expect(styleOf({ border: 'solid' }).borderColor.top).toBe('#000');
+    expect(styleOf({ border: 'solid' }).borderColor.top).toEqual(BLACK);
     expect(styleOf({ border: '4 none' }).borderWidth.top).toBe(0);
     expect(styleOf({ border: 'hidden' }).borderWidth.left).toBe(0);
-    expect(styleOf({ border: '1 solid rgb(1, 2, 3)' }).borderColor.top).toBe('rgb(1, 2, 3)');
+    expect(styleOf({ border: '1 solid rgb(1, 2, 3)' }).borderColor.top).toEqual(rgb(1, 2, 3));
     expect(() => styleOf({ border: '1 solid red blue' })).toThrow(/^ngpdf: too many values/);
   });
 
   it('warns for an unsupported border style on a side shorthand too', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    styleOf({ 'border-top': '1 dotted red' });
+    const warn = vi.fn();
+    styleOf({ 'border-top': '1 dotted red' }, 'pdf-view', warn);
     expect(warn).toHaveBeenCalledExactlyOnceWith(
       'ngpdf: border style "dotted" is not supported; drawing solid',
     );
   });
 
   it('does not warn for solid or none borders', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    styleOf({ border: '1 solid red' });
-    styleOf({ border: 'none' });
+    const warn = vi.fn();
+    styleOf({ border: '1 solid red' }, 'pdf-view', warn);
+    styleOf({ border: 'none' }, 'pdf-view', warn);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('parses every color property and names the element of an invalid one', () => {
+    const style = styleOf({
+      color: 'rgba(255, 0, 0, 0.5)',
+      'background-color': 'Navy',
+      'border-color': '#0f08 red',
+      'border-left-color': 'rgb(0 255 0)',
+      'border-top': '1 solid Red',
+    });
+    expect(style.color).toEqual(rgb(255, 0, 0, 0.5));
+    expect(style.backgroundColor).toEqual(rgb(0, 0, 128));
+    expect(style.borderColor).toEqual({
+      top: RED,
+      right: RED,
+      bottom: rgb(0, 255, 0, 0x88 / 255),
+      left: rgb(0, 255, 0),
+    });
+    for (const property of ['color', 'background-color', 'border-color', 'border-top-color']) {
+      expect(() => styleOf({ [property]: 'reddish' }, 'pdf-text')).toThrow(
+        'ngpdf: invalid color "reddish" on pdf-text',
+      );
+    }
+    expect(() => styleOf({ border: '1 solid reddish' })).toThrow(
+      'ngpdf: invalid color "reddish" on pdf-view',
+    );
+  });
+
+  it('paints no background for a transparent color', () => {
+    expect(styleOf({ 'background-color': 'transparent' }).backgroundColor).toBeNull();
+    expect(styleOf({ 'background-color': 'rgba(1, 2, 3, 0)' }).backgroundColor).toBeNull();
+    expect(styleOf({ color: 'transparent' }).color).toEqual(rgb(0, 0, 0, 0));
   });
 
   it('resolves line-height forms', () => {

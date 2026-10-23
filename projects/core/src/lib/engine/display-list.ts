@@ -1,4 +1,5 @@
 import { propsOf } from '../tree/node';
+import { toHex, type Color } from './color';
 import { fontFor, toWinAnsi } from './fonts';
 import { fitImage } from './images';
 import type { Box } from './layout';
@@ -14,6 +15,12 @@ export interface DisplayListOptions {
 }
 
 const DEFAULT_FORMAT = '{page} / {total}';
+
+/** The op color and opacity for `color`; null when its alpha leaves nothing to paint. */
+function paint(color: Color, opacity: number): { color: string; opacity: number } | null {
+  if (color.a <= 0) return null;
+  return { color: toHex(color), opacity: opacity * color.a };
+}
 
 interface Cuts {
   readonly top: boolean;
@@ -39,7 +46,8 @@ function drawBox(
   const opacity = inherited * style.opacity;
 
   const bottomEdge = Math.min(y + box.h, limit);
-  if (style.backgroundColor !== null && bottomEdge > y) {
+  const background = style.backgroundColor && paint(style.backgroundColor, opacity);
+  if (background && bottomEdge > y) {
     out.push({
       op: 'rect',
       x,
@@ -47,19 +55,20 @@ function drawBox(
       w: box.w,
       h: bottomEdge - y,
       radius: style.borderRadius,
-      fill: style.backgroundColor,
-      opacity,
+      fill: background.color,
+      opacity: background.opacity,
     });
   }
 
   const { top, right, bottom, left } = box.border;
   const color = style.borderColor;
-  const line = (x1: number, y1: number, x2: number, y2: number, width: number, c: string): void => {
+  const line = (x1: number, y1: number, x2: number, y2: number, width: number, c: Color): void => {
     const cutY1 = Math.min(y1, limit);
     const cutY2 = Math.min(y2, limit);
+    const stroke = paint(c, opacity);
     // A line wholly below the limit is gone; a vertical one is shortened.
-    if (y1 >= limit && y2 >= limit) return;
-    out.push({ op: 'line', x1, y1: cutY1, x2, y2: cutY2, width, color: c, opacity });
+    if (!stroke || (y1 >= limit && y2 >= limit)) return;
+    out.push({ op: 'line', x1, y1: cutY1, x2, y2: cutY2, width, ...stroke });
   };
   if (top > 0 && !cuts.top) line(x, y + top / 2, x + box.w, y + top / 2, top, color.top);
   if (right > 0)
@@ -86,7 +95,8 @@ function drawBox(
     drawBox(child, x + child.x, y + child.y, limit, nested, opacity, out);
   }
 
-  if (box.text) {
+  const ink = paint(style.color, opacity);
+  if (box.text && ink) {
     const font = fontFor(style);
     const lineHeight = style.fontSize * style.lineHeight;
     for (const textLine of box.text.lines) {
@@ -99,8 +109,7 @@ function drawBox(
         text: textLine.text,
         font,
         size: style.fontSize,
-        color: style.color,
-        opacity,
+        ...ink,
         underline: style.textDecoration === 'underline',
         strike: style.textDecoration === 'line-through',
       });
@@ -165,30 +174,33 @@ export function displayList(
 
   if (page.pageNumber) {
     const { box, x, y } = page.pageNumber;
-    drawBox(box, x, y, Infinity, { top: false, bottom: false }, page.pageNumber.opacity ?? 1, out);
-    const format = pageNumberFormat ?? stringProp(propsOf(box.node)['format']) ?? DEFAULT_FORMAT;
-    const filled = format
-      .replaceAll('{page}', () => String(pageIndex + 1))
-      .replaceAll('{total}', () => String(pageCount));
-    const text = toWinAnsi(filled, options.warn ?? (() => undefined));
+    const opacity = page.pageNumber.opacity ?? 1;
+    drawBox(box, x, y, Infinity, { top: false, bottom: false }, opacity, out);
     const { style } = box;
-    const font = fontFor(style);
-    const left = box.padding.left + box.border.left;
-    const top = box.padding.top + box.border.top;
-    const contentWidth = Math.max(0, box.w - left - box.padding.right - box.border.right);
-    const width = options.metrics.widthOf(text, font, style.fontSize);
-    out.push({
-      op: 'text',
-      x: alignedX(x + left, contentWidth, width, style.textAlign),
-      y: y + top,
-      text,
-      font,
-      size: style.fontSize,
-      color: style.color,
-      opacity: (page.pageNumber.opacity ?? 1) * style.opacity,
-      underline: style.textDecoration === 'underline',
-      strike: style.textDecoration === 'line-through',
-    });
+    const ink = paint(style.color, opacity * style.opacity);
+    if (ink) {
+      const format = pageNumberFormat ?? stringProp(propsOf(box.node)['format']) ?? DEFAULT_FORMAT;
+      const filled = format
+        .replaceAll('{page}', () => String(pageIndex + 1))
+        .replaceAll('{total}', () => String(pageCount));
+      const text = toWinAnsi(filled, options.warn ?? (() => undefined));
+      const font = fontFor(style);
+      const left = box.padding.left + box.border.left;
+      const top = box.padding.top + box.border.top;
+      const contentWidth = Math.max(0, box.w - left - box.padding.right - box.border.right);
+      const width = options.metrics.widthOf(text, font, style.fontSize);
+      out.push({
+        op: 'text',
+        x: alignedX(x + left, contentWidth, width, style.textAlign),
+        y: y + top,
+        text,
+        font,
+        size: style.fontSize,
+        ...ink,
+        underline: style.textDecoration === 'underline',
+        strike: style.textDecoration === 'line-through',
+      });
+    }
   }
   return out;
 }
