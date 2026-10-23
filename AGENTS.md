@@ -46,6 +46,9 @@ node scripts/e2e.mjs [--update]        # demo PDFs in headless Chrome vs e2e/exp
 6 GB memory cap. The end-to-end script uses the host's `/usr/bin/google-chrome` and runs
 `pdftotext` in Docker.
 
+- Never stop, kill or remove Docker containers you did not start. Name your own containers
+  (`--name`) and stop only those.
+
 ## Architecture rules
 
 - **Two halves, and the line between them is the bundle.**
