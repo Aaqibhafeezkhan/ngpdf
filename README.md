@@ -15,7 +15,7 @@ at most 15 KB gzipped to your initial bundle.
 npm install @ngpdf/core
 ```
 
-It needs `@angular/core` 22 or newer (`@Service` landed in 22.0), and works zoneless and with zone.js.
+It needs `@angular/core` 22 or newer, and works zoneless and with zone.js.
 
 ## Example: a communicators list
 
@@ -90,6 +90,21 @@ The header row repeats on every page, rows are never split, and the text stays s
   horizontal padding on the `pdf-cell`s.
 - A unit taller than a page (a row, or a `pdf-view` in a column) is clipped to its page.
 - `border-radius` together with borders draws square border lines.
+- A bare number is in points, except in `line-height`, where it multiplies the font size as in
+  CSS (`line-height: 1.4`). Write `line-height: 14pt` for points.
+- Text sits at the top of its line box: extra `line-height` goes below the text, not half above
+  and half below as in CSS.
+- Bare text inside an element other than `pdf-text` (`<pdf-cell>{{ x }}</pdf-cell>`) is laid out
+  as an anonymous `pdf-text` with its parent's text styles.
+- Your own components inside a document are transparent, like `display: contents`: their
+  `pdf-*` elements are laid out as if written in place, and styles on the component's host
+  element are ignored with a warning. Style a `pdf-*` element inside it instead.
+- Colors are hex (3, 4, 6 or 8 digits), `rgb()`/`rgba()`, the CSS named colors and
+  `transparent`. Other forms, such as `hsl()`, throw.
+- `opacity` multiplies down the tree; a faded view's children are each faded, not composited as
+  one group, so overlapping children show through each other.
+- A table header row is not repeated on a page whose first row fits only without it.
+- Images fetched from a URL have no size limit; a very large image is downloaded in full.
 
 ## Demo
 

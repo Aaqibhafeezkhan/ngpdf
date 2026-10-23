@@ -1,7 +1,8 @@
 # Engineering practices
 
-How ngpdf is tested, checked, secured and released. Every rule here is enforced by a tool in CI.
-A rule that no tool enforces is a wish, and does not belong in this file.
+How ngpdf is tested, checked, secured and released. Every rule here is enforced by a tool in CI,
+or by a repository setting or a maintainer step that this file names as such. A rule that nothing
+enforces is a wish, and does not belong in this file.
 
 ## Tests
 
@@ -14,7 +15,7 @@ Tests are written first and must fail without the change they cover (see `AGENTS
 | Component | Real templates (control flow, pipes, DI) build the right tree | Vitest (jsdom) + Angular compiler (`@analogjs/vite-plugin-angular`) | `render/*.spec.ts` |
 | Integration | The whole engine, with a recording fake `PdfWriter` | Vitest | `engine/engine.spec.ts` |
 | End to end | The demo's three PDFs in a real Chrome, compared as text with `pdftotext -layout` | `puppeteer-core` + poppler (Docker) | `scripts/e2e.mjs`, `e2e/expected/` |
-| Performance | No regression on a 1,000-row table | `vitest bench` | `engine/*.bench.ts` |
+| Performance | No regression on a 1,000-row table | `vitest bench` | `engine/*.bench.ts`, weekly CI job |
 | Mutation | The tests catch real faults in the engine | StrykerJS | weekly CI job |
 
 ### Property tests (fast-check)
@@ -41,7 +42,8 @@ These invariants are checked for any input:
 ### Mutation testing (StrykerJS)
 
 - **Weekly job on `engine/`:** the score must stay at or above 80%.
-- **Surviving mutants** become issues labelled `test-gap`.
+- **Surviving mutants:** the maintainer reads the weekly report and opens an issue labelled
+  `test-gap` for each one worth a test. This step is manual.
 
 ### End-to-end golden files
 
@@ -54,9 +56,12 @@ These invariants are checked for any input:
 
 ### Performance
 
-- `vitest bench` lays out and paginates a 1,000-row table.
-- CI fails if the median is more than 20% slower than the stored baseline.
-- Target in Node 24: under 300 ms.
+- `vitest bench` lays out and paginates a 1,000-row table, in the weekly workflow (not on every
+  pull request).
+- That job fails if the median is more than 20% slower than the baseline stored in
+  `paginate.bench.ts` (`BENCH_BASELINE_TOLERANCE=0.2`).
+- Target in Node 24 on a developer machine: under 300 ms. It is a local target and is not
+  asserted, because a shared runner's speed varies more than the code does.
 
 ## Formatting and lint
 
@@ -98,20 +103,24 @@ These invariants are checked for any input:
 
 ### Jobs on every pull request and every push to `main`
 
-1. **Install:** `npm ci --ignore-scripts`. The few packages that need an install script are listed
-   explicitly in a follow-up `npm rebuild`.
+1. **Install:** `npm ci --ignore-scripts`. No package needs an install script today; one that does
+   gets a named `npm rebuild` step.
 2. **Format:** `prettier --check .`.
-3. **Lint:** `eslint .`.
+3. **Lint:** `eslint .`, then `node scripts/check-readme.mjs`, which fails when the package
+   README's usage sections differ from the repository README's.
 4. **Typecheck:** `tsc -p projects/core/tsconfig.lib.json --noEmit` and `ng build demo`.
 5. **Tests:** `npm test -- --coverage`, with the coverage gates above.
 6. **Bundle budget:** `node scripts/bundle-budget.mjs`.
 7. **End to end:** `node scripts/e2e.mjs`, using Chrome from `browser-actions/setup-chrome`.
-8. **Library build:** `npm run build:core`, then `npm pack --dry-run`, which checks the published
-   files (no specs, no source maps of tests, a LICENSE).
+8. **Library build:** `npm run build:core`, then `node scripts/check-pack.mjs`, which reads the
+   file list of `npm pack --dry-run` and fails on a spec, bench or test helper, or a missing
+   LICENSE or README.
+9. **Dependency scans:** OSV-Scanner and `npm audit` (see "Dependency vulnerabilities").
 
 ### Scheduled jobs (weekly)
 
 - Mutation testing.
+- The performance bench.
 - CodeQL.
 - OpenSSF Scorecard.
 - OSV-Scanner over the lockfile.
@@ -123,6 +132,8 @@ These invariants are checked for any input:
 - **Pinned actions:** third-party actions are pinned to a full commit SHA, with the version in a
   comment. Dependabot updates them.
 - **Untrusted triggers:** no `pull_request_target`, and no secrets reach jobs that run fork code.
+- **Bounded jobs:** every job sets `timeout-minutes`, so a hung step cannot hold a runner for the
+  default six hours.
 
 ## Security
 
@@ -143,9 +154,12 @@ often comes from users or a server. The risks, and the answer to each:
 
 **Scanning:**
 
-- `npm audit --omit=dev --audit-level=high` runs on every PR.
-- OSV-Scanner over `package-lock.json` runs on every PR and weekly.
-- Dependabot security alerts are on.
+- **OSV-Scanner** over `package-lock.json` runs on every PR and weekly. It is the gating scanner:
+  a finding fails CI unless it is ignored in `osv-scanner.toml`.
+- **`npm audit --omit=dev --audit-level=high`** runs on every PR as an advisory step
+  (`continue-on-error`): it cannot read the ignore list, so it reports without failing the job.
+  Both read the GitHub Advisory Database, so OSV-Scanner sees the same advisories.
+- Dependabot security alerts are on (a repository setting).
 
 **Response times by CVSS v3.1/v4 base score, for runtime dependencies or anything shipped in the
 package:**
@@ -159,11 +173,15 @@ package:**
 
 - A dev-only dependency (build, test, lint) is fixed within 30 days whatever its score, unless it
   runs in CI with secrets. In that case the table applies.
+  - `@changesets/*` is such a dependency: the `release-pr` job runs it with `RELEASE_BOT_TOKEN`,
+    which can write to the repository and open pull requests. Its advisories follow the full
+    CVSS table.
 - **Advisories that do not affect ngpdf** (the vulnerable code is not reachable from it):
   - the finding is ignored in `osv-scanner.toml` with a written reason and an expiry date of at
     most 90 days;
-  - the CI audit step reads the same list;
-  - a finding with no expiry is not allowed.
+  - `scripts/check-osv-ignores.mjs` fails CI on an entry with no reason, no expiry, or an expiry
+    more than 90 days ahead;
+  - `npm audit` does not read this list, which is why it is advisory.
 
 **Updates:**
 
@@ -174,8 +192,9 @@ package:**
 
 ### Code scanning
 
-- CodeQL (`javascript-typescript`, `security-extended` queries) runs on PRs and weekly, and an
-  alert of high severity or above fails the PR.
+- CodeQL (`javascript-typescript`, `security-extended` queries) runs on PRs and weekly.
+- An alert of high severity or above fails the PR through a code scanning rule in the repository
+  settings, not through the workflow. The maintainer checklist in `CONTRIBUTING.md` sets it.
 - GitHub secret scanning and push protection are on.
 
 ### Reporting

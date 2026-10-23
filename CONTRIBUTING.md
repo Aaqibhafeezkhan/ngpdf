@@ -77,7 +77,7 @@ Report vulnerabilities privately. See `SECURITY.md`.
 Done by hand in GitHub and npm. Nothing in the workflows sets these.
 
 - [ ] Protect `main`: require a pull request, require the CI jobs (`format`, `lint`, `typecheck`,
-      `test`, `audit`, `osv-scanner`, `bundle-budget`, `build`, `e2e`) and the CodeQL check, require
+      `test`, `osv-scanner`, `bundle-budget`, `build`, `e2e`) and the CodeQL check, require
       the branch to be up to date, block force pushes.
 - [ ] Add a code scanning rule that fails a pull request on an alert of high severity or above.
 - [ ] Enable private vulnerability reporting (Settings, Code security).
@@ -86,6 +86,13 @@ Done by hand in GitHub and npm. Nothing in the workflows sets these.
 - [ ] Require 2FA in the GitHub org `ngpdf` and in the npm org `ngpdf`.
 - [ ] On npm, add the GitHub repository `ngpdf/ngpdf` and the workflow `release.yml` as a trusted
       publisher of `@ngpdf/core`. Create no `NPM_TOKEN`.
+- [ ] First release only: npm may not let you add a trusted publisher to a package that does not
+      exist yet. If so, publish the first version by hand, once: 1. Merge the "chore: version packages" pull request. The release workflow's `publish` job
+      fails, because no trusted publisher is set. 2. On that merge commit, run `./scripts/dev npm ci` and `./scripts/dev npm run build:core`. 3. On your machine, run `npm login` with the 2FA account of the `ngpdf` org, then
+      `npm publish --access public` in `dist/core`. This version has no provenance. 4. Add the trusted publisher (above), then `npm logout`. Keep no token. 5. Rerun the release workflow with "Re-run all jobs" (not only the failed ones, which would
+      keep the old decision). Its `check` job sees the version on npm, skips `publish` and
+      creates the GitHub release with the SBOM. Later versions publish from the workflow with
+      provenance.
 - [ ] Create the repository secret `RELEASE_BOT_TOKEN`: a GitHub App installation token or a
       fine-grained PAT limited to this repository with contents and pull-requests write. Only the
       `release-pr` job reads it. Without it the job falls back to `GITHUB_TOKEN`, and the version
