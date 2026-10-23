@@ -1,5 +1,9 @@
 # ngpdf
 
+[![CI](https://github.com/ngpdf/ngpdf/actions/workflows/ci.yml/badge.svg)](https://github.com/ngpdf/ngpdf/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@ngpdf/core)](https://www.npmjs.com/package/@ngpdf/core)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ngpdf/ngpdf/badge)](https://scorecard.dev/viewer/?uri=github.com/ngpdf/ngpdf)
+
 Write PDFs as Angular components, for Angular. A document is a normal component whose template
 uses the `pdf-*` elements; ngpdf lays it out, breaks it into pages and writes the PDF in the
 browser. The layout and PDF engine is loaded on the first render, so importing `@ngpdf/core` adds
@@ -94,4 +98,6 @@ capture report, a communicators list and a licences list. Run it with `npm start
 
 ## License
 
-MIT
+MIT.
+
+Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md). Security: see [SECURITY.md](SECURITY.md).
