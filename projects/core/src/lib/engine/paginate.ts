@@ -189,6 +189,8 @@ function collectUnits(content: Box, maxHeader: number, pageOpacity: number): Col
   };
 
   if (content.style.flexDirection === 'row') {
+    // The unit is the content box itself, whose style already carries the page's opacity; the
+    // display list applies it, so passing pageOpacity here would fade the page twice.
     units.push({ box: content, x: 0, top: 0, bottom: content.h, header: null, opacity: 1 });
   } else {
     for (const child of content.children) visit(child, child.x, child.y, null, pageOpacity);

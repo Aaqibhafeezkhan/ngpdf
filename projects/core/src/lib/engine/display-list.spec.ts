@@ -110,6 +110,16 @@ describe('displayList', () => {
     expect(only(ops, 'text').map((op) => op.text)).toEqual(['Shown']);
   });
 
+  it('fades the content of a faded page once, in a row page as in a column page', () => {
+    const opacityOf = (direction: string): number[] => {
+      const child = el('pdf-view', { 'background-color': '#000', width: '20', height: '20' });
+      const laid = layout(page([child], { opacity: '0.5', 'flex-direction': direction }));
+      return only(list(laid[0]!, 0, 1), 'rect').map((op) => op.opacity);
+    };
+    expect(opacityOf('column')).toEqual([0.5]);
+    expect(opacityOf('row')).toEqual([0.5]);
+  });
+
   it('passes radius and opacity to the background rect', () => {
     const style = {
       'background-color': '#000',
