@@ -86,7 +86,18 @@ function extractAll(names) {
   ].join('\n');
   const output = execFileSync(
     'docker',
-    ['run', '--rm', '-v', `${ROOT}:/w:ro`, 'node:24-bookworm-slim', 'sh', '-c', script],
+    [
+      'run',
+      '--rm',
+      '--name',
+      `ngpdf-e2e-${String(process.pid)}`,
+      '-v',
+      `${ROOT}:/w:ro`,
+      'node:24-bookworm-slim',
+      'sh',
+      '-c',
+      script,
+    ],
     {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'inherit'],

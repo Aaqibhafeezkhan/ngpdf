@@ -5,7 +5,8 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tty_flags=()
 [ -t 0 ] && [ -t 1 ] && tty_flags=(-t)
-exec docker run --rm -i "${tty_flags[@]}" \
+# Named per process, so a stuck container can be found and stopped without touching others.
+exec docker run --rm -i --name "ngpdf-dev-$$" "${tty_flags[@]}" \
   -u 1000:1000 -m 6g --memory-swap 6g \
   -e HOME=/tmp -e NPM_CONFIG_UPDATE_NOTIFIER=false -e CI="${CI:-}" \
   -v "$root":/w -w /w \
