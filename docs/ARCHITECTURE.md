@@ -158,7 +158,7 @@ The following are stable data or stable algorithms with no credible second varia
 direct code. Strategy would add indirection with one implementation each.
 
 - **Lookup tables (`Map` or `Object.hasOwn`, never a plain-object index):** page sizes, unit
-  factors, standard font names.
+  factors, standard font names, CSS named colors.
 - **One algorithm each:** column width resolution, `object-fit`, and image source kinds (a
   four-case `switch` over the source type).
 
