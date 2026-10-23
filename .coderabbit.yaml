@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit reviews every pull request. It requests changes on what it finds and approves once
+# its comments are resolved. The rules it reviews against are in AGENTS.md, which it reads.
+language: en-US
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches: ['main']
+  path_filters:
+    - '!package-lock.json'
+    - '!e2e/expected/**'
+  path_instructions:
+    - path: 'projects/core/src/lib/engine/**'
+      instructions: >-
+        Lazy half. Stages are pure functions over readonly data: no mutation of inputs, no
+        module-level state, no I/O. Only engine/index.ts imports yoga-layout and the pdfkit
+        writer. Parsers must stay linear (no super-linear regex). Flag missing tests.
+    - path: 'projects/core/src/lib/{tree,elements,render}/**'
+      instructions: >-
+        Eager half. It must never import engine/ except through the dynamic import in
+        render/pdf-renderer.ts, pdfkit or yoga-layout, or grow the initial bundle past 15 KB
+        gzipped. Angular 22: signals, input(), inject(), no explicit standalone or OnPush.
+    - path: '.github/workflows/**'
+      instructions: >-
+        Least privilege permissions, actions pinned to a full SHA with the version in a comment,
+        timeout-minutes on every job, no pull_request_target, no secrets in jobs that run fork
+        code.
+    - path: '.changeset/*.md'
+      instructions: >-
+        A changeset is the CHANGELOG entry users read. It says what changed for them and why, in
+        plain English, not how the code changed.
+chat:
+  auto_reply: true

@@ -44,8 +44,10 @@ nothing: revert the change and check that the test fails.
 A pull request that changes the published package adds a changeset:
 
 ```sh
-./scripts/dev npm run changeset
+NGPDF_IMAGE=node:24-bookworm ./scripts/dev npm run changeset
 ```
+
+(The full Node image, because changesets reads Git and the slim image has no `git`.)
 
 Choose the bump (`patch`, `minor` or `major`; under `0.x` a minor may break) and describe the change
 for users. Commit the generated file in `.changeset/`. When changesets reach `main`, a bot opens a
@@ -56,6 +58,20 @@ If the version pull request shows no checks (a pull request opened with `GITHUB_
 workflows), close and reopen it, or push an empty commit to its branch
 (`git commit --allow-empty -m "chore: trigger ci"`), so the required checks run. Setting
 `RELEASE_BOT_TOKEN` (below) avoids this.
+
+## Review
+
+[CodeRabbit](https://coderabbit.ai) reviews every pull request against the rules in `AGENTS.md`.
+It requests changes on what it finds and approves once its comments are resolved. Answer its
+comments in the thread: reply with a fix, or explain why not and it will resolve the comment.
+CI must be green before merging.
+
+## Credits
+
+Everyone who contributes is listed in the README, following
+[all-contributors](https://allcontributors.org). After a pull request is merged, comment on it:
+`@all-contributors please add @<user> for code` (or `doc`, `bug`, `ideas`, `test`, and so on). The
+bot opens a pull request that updates `.all-contributorsrc` and the README.
 
 ## Commits
 
@@ -85,14 +101,14 @@ Done by hand in GitHub and npm. Nothing in the workflows sets these.
 - [ ] Enable Dependabot alerts and Dependabot security updates.
 - [ ] Require 2FA in the GitHub org `ngpdf` and in the npm org `ngpdf`.
 - [ ] On npm, add the GitHub repository `ngpdf/ngpdf` and the workflow `release.yml` as a trusted
-      publisher of `@ngpdf/core`. Create no `NPM_TOKEN`.
-- [ ] First release only: npm may not let you add a trusted publisher to a package that does not
-      exist yet. If so, publish the first version by hand, once: 1. Merge the "chore: version packages" pull request. The release workflow's `publish` job
-      fails, because no trusted publisher is set. 2. On that merge commit, run `./scripts/dev npm ci` and `./scripts/dev npm run build:core`. 3. On your machine, run `npm login` with the 2FA account of the `ngpdf` org, then
-      `npm publish --access public` in `dist/core`. This version has no provenance. 4. Add the trusted publisher (above), then `npm logout`. Keep no token. 5. Rerun the release workflow with "Re-run all jobs" (not only the failed ones, which would
-      keep the old decision). Its `check` job sees the version on npm, skips `publish` and
-      creates the GitHub release with the SBOM. Later versions publish from the workflow with
-      provenance.
+      publisher of `@ngpdf/core`.
+- [ ] First release only. npm takes a trusted publisher only for a package that exists, so the
+      first version is published from the workflow with a short-lived token:
+  1. Create a granular npm access token with read and write on the `@ngpdf` scope and a
+     7-day expiry, and save it as the repository secret `NPM_TOKEN`.
+  2. Push or rerun the release workflow. The `publish` job publishes with provenance.
+  3. Add the trusted publisher (above), delete the `NPM_TOKEN` secret and revoke the token
+     on npm. Later versions publish through OIDC only.
 - [ ] Create the repository secret `RELEASE_BOT_TOKEN`: a GitHub App installation token or a
       fine-grained PAT limited to this repository with contents and pull-requests write. Only the
       `release-pr` job reads it. Without it the job falls back to `GITHUB_TOKEN`, and the version

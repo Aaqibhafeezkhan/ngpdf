@@ -99,7 +99,7 @@ jobs:
           retention-days: 7
 
   # The only job with id-token: publishes to npm with trusted publishing (OIDC) and provenance.
-  # There is no NPM_TOKEN. It runs no repository code except `npm publish`.
+  # It runs no repository code except `npm publish`.
   publish:
     needs: [check, build]
     if: needs.check.outputs.publish == 'true'
@@ -122,6 +122,10 @@ jobs:
           printf '11.5.1\n%s\n' "$(npm --version)" | sort -V -C
       - run: npm publish --provenance --access public
         working-directory: dist/core
+        env:
+          # Only for the first version: npm takes a trusted publisher only for a package that
+          # exists. Once it is added on npmjs.com, delete the NPM_TOKEN secret and npm uses OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # Creates the GitHub release with the SBOM. It runs when npm was published now or earlier, and
   # also when only this step failed on a previous run.

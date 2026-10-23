@@ -2,7 +2,13 @@
 
 [![CI](https://github.com/ngpdf/ngpdf/actions/workflows/ci.yml/badge.svg)](https://github.com/ngpdf/ngpdf/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@ngpdf/core)](https://www.npmjs.com/package/@ngpdf/core)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ngpdf/ngpdf/badge)](https://scorecard.dev/viewer/?uri=github.com/ngpdf/ngpdf)
+<!-- prettier-ignore-start -->
+<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+[![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors-)
+<!-- ALL-CONTRIBUTORS-BADGE:END -->
+<!-- prettier-ignore-end -->
 
 Write PDFs as Angular components, for Angular. A document is a normal component whose template
 uses the `pdf-*` elements; ngpdf lays it out, breaks it into pages and writes the PDF in the
@@ -111,8 +117,36 @@ The header row repeats on every page, rows are never split, and the text stays s
 The demo app in [`projects/demo`](projects/demo) builds three documents from made-up data: a
 capture report, a communicators list and a licences list. Run it with `npm start`.
 
+## Releases
+
+Each version is listed in [`projects/core/CHANGELOG.md`](projects/core/CHANGELOG.md) and on the
+[releases page](https://github.com/ngpdf/ngpdf/releases), with its SBOM. Versions on npm are
+published from GitHub Actions with [provenance](https://docs.npmjs.com/generating-provenance-statements),
+which links each one to the commit and workflow that built it.
+
+## Contributors ✨
+
+Thanks go to these people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/GabeSilvaDev"><img src="https://avatars.githubusercontent.com/u/96894950?v=4?s=100" width="100px;" alt="Gabriel Silva"/><br /><sub><b>Gabriel Silva</b></sub></a><br /><a href="https://github.com/ngpdf/ngpdf/commits?author=GabeSilvaDev" title="Code">💻</a> <a href="https://github.com/ngpdf/ngpdf/commits?author=GabeSilvaDev" title="Documentation">📖</a> <a href="#design-GabeSilvaDev" title="Design">🎨</a> <a href="https://github.com/ngpdf/ngpdf/commits?author=GabeSilvaDev" title="Tests">⚠️</a> <a href="#infra-GabeSilvaDev" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a> <a href="#maintenance-GabeSilvaDev" title="Maintenance">🚧</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+This project follows the [all-contributors](https://github.com/all-contributors/all-contributors)
+specification. Contributions of any kind are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
-MIT.
-
-Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md). Security: see [SECURITY.md](SECURITY.md).
+[MIT](LICENSE). Security: see [SECURITY.md](SECURITY.md).

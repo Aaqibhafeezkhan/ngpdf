@@ -1,11 +1,27 @@
 {
   "name": "@ngpdf/core",
-  "version": "0.0.0",
-  "description": "ngpdf — write PDFs as Angular components, for Angular",
+  "version": "0.1.0",
+  "description": "ngpdf \u2014 write PDFs as Angular components, for Angular",
+  "keywords": [
+    "angular",
+    "pdf",
+    "pdf-generation",
+    "pdfkit",
+    "yoga",
+    "renderer",
+    "report",
+    "components"
+  ],
+  "author": "Gabriel Silva (https://github.com/GabeSilvaDev)",
+  "homepage": "https://github.com/ngpdf/ngpdf#readme",
+  "bugs": {
+    "url": "https://github.com/ngpdf/ngpdf/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ngpdf/ngpdf.git"
+    "url": "git+https://github.com/ngpdf/ngpdf.git",
+    "directory": "projects/core"
   },
   "peerDependencies": {
     "@angular/core": "^22.0.0"

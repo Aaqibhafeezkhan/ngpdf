@@ -1,0 +1,22 @@
+{
+  "projectName": "ngpdf",
+  "projectOwner": "ngpdf",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": ["README.md"],
+  "imageSize": 100,
+  "commit": false,
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributorsPerLine": 7,
+  "linkToUsage": false,
+  "contributors": [
+    {
+      "login": "GabeSilvaDev",
+      "name": "Gabriel Silva",
+      "avatar_url": "https://avatars.githubusercontent.com/u/96894950?v=4",
+      "profile": "https://github.com/GabeSilvaDev",
+      "contributions": ["code", "doc", "design", "test", "infra", "maintenance"]
+    }
+  ]
+}
