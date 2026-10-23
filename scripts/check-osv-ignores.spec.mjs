@@ -66,4 +66,45 @@ describe('checkOsvIgnores', () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('#2');
   });
+
+  it('checks an entry whose header has a comment or extra spaces', () => {
+    for (const header of [
+      '[[IgnoredVulns]] # note',
+      '[[ IgnoredVulns ]]',
+      '  [[IgnoredVulns]]#x',
+    ]) {
+      const toml = `${header}\n${id}\n${reason}\n`;
+      const problems = checkOsvIgnores(toml, TODAY);
+      expect(problems, header).toHaveLength(1);
+      expect(problems[0], header).toContain('missing ignoreUntil');
+    }
+  });
+
+  it('reads quoted keys', () => {
+    expect(
+      checkOsvIgnores(
+        entry(['"id" = "GHSA-x"', "'reason' = 'why'", '"ignoreUntil" = 2026-12-01']),
+        TODAY,
+      ),
+    ).toEqual([]);
+    expect(
+      checkOsvIgnores(entry(['"id" = "GHSA-x"', '"ignoreUntil" = 2026-12-01']), TODAY)[0],
+    ).toContain('missing reason');
+  });
+
+  it('reads a multi-line reason and rejects an unterminated one', () => {
+    const ok = entry([
+      id,
+      'ignoreUntil = 2026-12-01',
+      'reason = """',
+      'Unreachable because',
+      'ngpdf never calls it.',
+      '"""',
+    ]);
+    expect(checkOsvIgnores(ok, TODAY)).toEqual([]);
+    const blank = entry([id, 'ignoreUntil = 2026-12-01', 'reason = """', '"""']);
+    expect(checkOsvIgnores(blank, TODAY)[0]).toContain('missing reason');
+    const open = entry([id, 'ignoreUntil = 2026-12-01', 'reason = """', 'never closed']);
+    expect(() => checkOsvIgnores(open, TODAY)).toThrow('unterminated multi-line string');
+  });
 });
