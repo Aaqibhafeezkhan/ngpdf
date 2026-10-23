@@ -54,27 +54,69 @@ const WIDTH_EPSILON = 1e-6;
 // Yoga stores sizes as float32, which can round a measured width down by a few millionths.
 const WIDTH_SLACK = 0.001;
 
+/** A column's amount: points, or the number before `fr` or `%`; throws on anything else. */
+function columnAmount(column: TableColumn, suffix: '' | 'fr' | '%'): number {
+  const text = typeof column === 'number' ? '' : column;
+  let amount: number = typeof column === 'number' ? column : NaN;
+  if (suffix !== '' && text.endsWith(suffix)) {
+    const number = text.slice(0, -suffix.length);
+    // Number('') is 0 and Number(' 1') is 1; neither is a column.
+    if (number !== '' && number.trim() === number) amount = Number(number);
+  }
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error(`ngpdf: invalid column "${String(column)}" on pdf-table`);
+  }
+  return amount;
+}
+
+function suffixOf(column: TableColumn): '' | 'fr' | '%' {
+  if (typeof column === 'number') return '';
+  return column.endsWith('%') ? '%' : 'fr';
+}
+
 /**
  * Column widths in points: fixed columns first, then percentages of `tableWidth`, then the rest
  * split by `fr` shares. Fixed and percentage columns that overflow leave the fr columns at 0.
  */
 export function resolveColumns(columns: readonly TableColumn[], tableWidth: number): number[] {
-  const widths = columns.map((column) => {
-    if (typeof column === 'number') return column;
-    if (column.endsWith('%')) return (parseFloat(column) / 100) * tableWidth;
-    return 0;
+  const parsed = columns.map((column) => {
+    const suffix = suffixOf(column);
+    return { suffix, amount: columnAmount(column, suffix) };
   });
-  const frOf = (column: TableColumn): number =>
-    typeof column === 'string' && column.endsWith('fr') ? parseFloat(column) : 0;
-  const totalFr = columns.reduce<number>((sum, column) => sum + frOf(column), 0);
+  const widths = parsed.map(({ suffix, amount }) => {
+    if (suffix === '') return amount;
+    return suffix === '%' ? (amount / 100) * tableWidth : 0;
+  });
+  const totalFr = parsed.reduce(
+    (sum, { suffix, amount }) => sum + (suffix === 'fr' ? amount : 0),
+    0,
+  );
   if (totalFr > 0) {
     const taken = widths.reduce((sum, width) => sum + width, 0);
     const perFr = Math.max(0, tableWidth - taken) / totalFr;
-    columns.forEach((column, i) => {
-      if (frOf(column) > 0) widths[i] = frOf(column) * perFr;
+    parsed.forEach(({ suffix, amount }, i) => {
+      if (suffix === 'fr') widths[i] = amount * perFr;
     });
   }
   return widths;
+}
+
+/** How many columns a cell covers: its `span`, at least 1. */
+function spanOf(cell: PdfNode): number {
+  return Math.max(1, Math.floor(Number(propsOf(cell)['span'] ?? 1)) || 1);
+}
+
+/** Throws when a table row's cells, spans counted, need more columns than the table declares. */
+function checkRowCells(row: PdfNode, columnCount: number): void {
+  let used = 0;
+  for (const child of row.children) {
+    if (child.kind === 'element' && child.tag === 'pdf-cell') used += spanOf(child);
+  }
+  if (used > columnCount) {
+    throw new Error(
+      `ngpdf: pdf-row has more cells than pdf-table columns (${String(used)} > ${String(columnCount)})`,
+    );
+  }
 }
 
 function percent(amount: number): `${number}%` {
@@ -365,12 +407,17 @@ export function layoutBox(
     let childColumns: readonly number[] | null = null;
     if (current.tag === 'pdf-table') {
       const known = tableWidths.get(current);
-      const declared = (propsOf(current)['columns'] ?? []) as TableColumn[];
+      const declared = (propsOf(current)['columns'] ?? []) as readonly TableColumn[];
       childColumns = known === undefined ? null : resolveColumns(declared, known);
+      for (const child of current.children) {
+        if (child.kind === 'element' && child.tag === 'pdf-row') {
+          checkRowCells(child, declared.length);
+        }
+      }
     } else if (current.tag === 'pdf-row' && columns) {
       childColumns = columns;
     } else if (current.tag === 'pdf-cell' && columns) {
-      const span = Math.max(1, Math.floor(Number(propsOf(current)['span'] ?? 1)) || 1);
+      const span = spanOf(current);
       const start = spanStart.next;
       spanStart.next += span;
       const cellWidth = columns.slice(start, start + span).reduce((sum, w) => sum + w, 0);

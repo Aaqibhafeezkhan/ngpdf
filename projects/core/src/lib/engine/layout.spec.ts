@@ -78,6 +78,19 @@ describe('resolveColumns', () => {
     expect(resolveColumns([300, '1fr'], 200)).toEqual([300, 0]);
   });
 
+  it.each([['abc'], ['2px'], ['fr'], ['%'], ['-1fr'], [' 1fr'], ['1e999%'], [-5], [NaN]])(
+    'throws on the column %j instead of computing NaN',
+    (column) => {
+      expect(() => resolveColumns([column as TableColumn, '1fr'], 400)).toThrow(
+        `ngpdf: invalid column "${String(column)}" on pdf-table`,
+      );
+    },
+  );
+
+  it('accepts decimal shares and percentages', () => {
+    expect(resolveColumns(['0.5fr', '1.5fr', '12.5%'], 400)).toEqual([87.5, 262.5, 50]);
+  });
+
   it('leaves the width unused when there is no fr column', () => {
     expect(resolveColumns([50, '10%'], 400)).toEqual([50, 40]);
   });
@@ -227,6 +240,26 @@ describe('tables', () => {
     const outer = table([100, '1fr'], [[el('pdf-cell', {}, [inner]), ...cells([1])]]);
     const innerBox = lay(outer, 300).children[0]?.children[0]?.children[0];
     expect(innerBox?.children[0]?.children.map((cell) => cell.w)).toEqual([50, 50]);
+  });
+
+  it('throws when a row has more cells than the table has columns, counting spans', () => {
+    expect(() => lay(table([30, '1fr'], [cells([1, 1]), cells([1, 1, 1])]), 300)).toThrow(
+      'ngpdf: pdf-row has more cells than pdf-table columns (3 > 2)',
+    );
+    expect(() => lay(table([30, '1fr'], [cells([2, 1])]), 300)).toThrow(
+      'ngpdf: pdf-row has more cells than pdf-table columns (3 > 2)',
+    );
+    expect(() => lay(table([], [cells([1])]), 300)).toThrow(
+      'ngpdf: pdf-row has more cells than pdf-table columns (1 > 0)',
+    );
+  });
+
+  it('lays out a row with fewer cells than columns', () => {
+    const row = lay(table([30, '1fr', 50], [cells([1, 1])]), 300).children[0];
+    expect(row?.children.map((cell) => [cell.x, cell.w])).toEqual([
+      [0, 30],
+      [30, 220],
+    ]);
   });
 
   it('lays out a table without rows', () => {
