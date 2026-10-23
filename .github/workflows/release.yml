@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Opens or updates the "Version Packages" pull request from the pending changesets.
+  release-pr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          version: npm run changeset:version
+          title: 'chore: version packages'
+          commit: 'chore: version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Read-only: decides whether this push is a release. It is when no changeset is pending (the
+  # "Version Packages" pull request consumed them) and the version is not on npm yet.
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: version
+        run: |
+          version="$(node -p "require('./projects/core/package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          pending="$(find .changeset -maxdepth 1 -name '*.md' ! -name README.md | wc -l)"
+          if [ "${pending}" -gt 0 ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif npm view "@ngpdf/core@${version}" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Builds without any write permission, so the publish job runs no build tooling.
+  build:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:coverage
+      - run: npm run build:core
+      # CycloneDX SBOM of the runtime dependencies, attached to the GitHub release.
+      - run: npm sbom --sbom-format cyclonedx --omit dev --workspace projects/core > sbom.cdx.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            dist/core
+            sbom.cdx.json
+          retention-days: 7
+
+  # The only job with id-token: publishes to npm with trusted publishing (OIDC) and provenance.
+  # There is no NPM_TOKEN. It runs no repository code except `npm publish`.
+  publish:
+    needs: [check, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - name: Check npm supports trusted publishing (11.5.1 or newer)
+        run: |
+          npm --version
+          printf '11.5.1\n%s\n' "$(npm --version)" | sort -V -C
+      - run: npm publish --provenance --access public
+        working-directory: dist/core
+      - name: GitHub release with the SBOM
+        run: gh release create "v${VERSION}" sbom.cdx.json --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "v${VERSION}" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
