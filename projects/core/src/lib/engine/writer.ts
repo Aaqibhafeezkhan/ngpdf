@@ -292,7 +292,11 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
       const doc = new PDFDocument({
         autoFirstPage: false,
         compress,
-        ...(needsPdf15 ? { pdfVersion: '1.5' as const } : info.language !== undefined ? { pdfVersion: '1.4' as const } : {}),
+        ...(needsPdf15
+          ? { pdfVersion: '1.5' as const }
+          : info.language !== undefined
+            ? { pdfVersion: '1.4' as const }
+            : {}),
         ...(info.language !== undefined && { lang: info.language }),
         info: {
           ...(info.title !== undefined && { Title: info.title }),
