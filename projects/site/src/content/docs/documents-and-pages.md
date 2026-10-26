@@ -22,6 +22,10 @@ Every document has one `pdf-document` at the top and one or more `pdf-page` elem
       subject="Q3 results"
       [keywords]="['finance', 'quarterly']"
       [creationDate]="generatedAt()"
+      language="en-US"
+      creator="Quarterly Report App"
+      pageMode="UseThumbs"
+      pageLayout="TwoColumnLeft"
     >
       <pdf-page style="padding: 20mm">
         <pdf-text>Hello, PDF.</pdf-text>
@@ -41,6 +45,11 @@ export class MetaDocument {
 | `subject` | `string` | Subject |
 | `keywords` | `readonly string[]` | Keywords, joined with `", "` |
 | `creationDate` | `Date` | CreationDate. Defaults to the time of the render. |
+| `language` | `string` | Canonical BCP 47 tag in `/Lang`; empty or invalid tags are errors. |
+| `creator` | `string` | Application attribution in `/Creator`; omitted when unset. |
+| `producer` | `string` | `/Producer`; defaults to `ngpdf` instead of PDFKit. |
+| `pageMode` | `PageMode` | Initial viewer mode: `UseNone`, `UseThumbs` or `FullScreen`. |
+| `pageLayout` | `PageLayout` | Initial layout: `SinglePage`, `OneColumn`, `TwoColumnLeft`, `TwoColumnRight`, `TwoPageLeft` or `TwoPageRight`. |
 
 An input you leave unset is not written. Pass a fixed `creationDate` when you need the same bytes for the same data, for example in snapshot tests: it is the only time source in a render.
 
