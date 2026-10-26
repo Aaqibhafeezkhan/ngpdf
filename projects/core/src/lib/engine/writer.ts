@@ -240,7 +240,26 @@ interface FontInternals {
 
 interface PdfKitInternals {
   info: { Creator?: unknown };
+  metadata: { _metadata: string };
+  _addInfo(): void;
   _root: { data: { PageMode?: PageMode; PageLayout?: PageLayout } };
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/[<>&"']/g, (character) => {
+    switch (character) {
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '&':
+        return '&amp;';
+      case '"':
+        return '&quot;';
+      default:
+        return '&apos;';
+    }
+  });
 }
 
 export async function createPdfkitWriter(options: { compress?: boolean } = {}): Promise<PdfWriter> {
@@ -310,6 +329,20 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
       });
       for (const [name, data] of registered) doc.registerFont(name, data);
       const internals = doc as unknown as PdfKitInternals;
+      // PDFKit uses info.Creator for both XMP CreatorTool and pdf:Producer, and inserts values as raw XML.
+      // Correct its XMP generation while leaving the PDF Info dictionary's creator value unchanged.
+      const addInfo = internals._addInfo;
+      internals._addInfo = () => {
+        const creator = internals.info.Creator;
+        const creatorTool = typeof creator === 'string' ? creator : info.producer;
+        internals.info.Creator = escapeXml(creatorTool);
+        addInfo.call(doc);
+        internals.metadata._metadata = internals.metadata._metadata.replace(
+          /<pdf:Producer>[\s\S]*?<\/pdf:Producer>/,
+          `<pdf:Producer>${escapeXml(info.producer)}</pdf:Producer>`,
+        );
+        internals.info.Creator = creator;
+      };
       // PDFKit injects Creator: 'PDFKit' when unset; its public options do not expose catalog viewer preferences.
       if (info.creator === undefined) delete internals.info.Creator;
       if (info.pageMode !== undefined) internals._root.data.PageMode = info.pageMode;

@@ -239,6 +239,43 @@ describe('createPdfkitWriter', () => {
     expect(infoString(pdf, 'Creator')).toBeUndefined();
   });
 
+  it('writes valid XMP metadata with the producer and escaped creator', async () => {
+    const blob = await writer.write([{ ...A4, ops: [] }], {
+      ...info,
+      language: 'en-US',
+      creator: 'R&D <Reports> "Team" \'Ops\'',
+      producer: 'ng&pdf',
+    });
+    const pdf = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
+    const xmp = pdf.match(/<\?xpacket begin="[\s\S]*?<\?xpacket end="w"\?>/)?.[0];
+
+    expect(xmp).toBeDefined();
+    expect(xmp).toContain(
+      '<xmp:CreatorTool>R&amp;D &lt;Reports&gt; &quot;Team&quot; &apos;Ops&apos;</xmp:CreatorTool>',
+    );
+    expect(xmp).toContain('<pdf:Producer>ng&amp;pdf</pdf:Producer>');
+    expect(xmp).not.toContain('undefined');
+
+    const parsed = new DOMParser().parseFromString(xmp!, 'application/xml');
+    expect(parsed.querySelector('parsererror')).toBeNull();
+  });
+
+  it('uses the producer in XMP when creator is unset', async () => {
+    const blob = await writer.write([{ ...A4, ops: [] }], {
+      ...info,
+      language: 'en-US',
+    });
+    const pdf = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
+    const xmp = pdf.match(/<\?xpacket begin="[\s\S]*?<\?xpacket end="w"\?>/)?.[0];
+
+    expect(xmp).toBeDefined();
+    expect(xmp).toContain('<xmp:CreatorTool>ngpdf</xmp:CreatorTool>');
+    expect(xmp).toContain('<pdf:Producer>ngpdf</pdf:Producer>');
+    expect(xmp).not.toContain('undefined');
+    const parsed = new DOMParser().parseFromString(xmp!, 'application/xml');
+    expect(parsed.querySelector('parsererror')).toBeNull();
+  });
+
   it('declares the PDF version required by language and two-page layout entries', async () => {
     const languageBlob = await writer.write([{ ...A4, ops: [] }], {
       ...info,
