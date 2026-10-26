@@ -1,3 +1,4 @@
+import type { PageLayout, PageMode } from './index';
 export type StandardFont =
   | 'Helvetica'
   | 'Helvetica-Bold'
@@ -76,14 +77,8 @@ export interface DocumentInfo {
   readonly language?: string;
   readonly creator?: string;
   readonly producer: string;
-  readonly pageMode?: 'UseNone' | 'UseThumbs' | 'FullScreen';
-  readonly pageLayout?:
-    | 'SinglePage'
-    | 'OneColumn'
-    | 'TwoColumnLeft'
-    | 'TwoColumnRight'
-    | 'TwoPageLeft'
-    | 'TwoPageRight';
+  readonly pageMode?: PageMode;
+  readonly pageLayout?: PageLayout;
   readonly creationDate: Date;
 }
 
@@ -236,6 +231,11 @@ interface PdfKitInternals {
   _root: { data: Record<string, unknown> };
 }
 
+interface FontInternals {
+  info: Record<string, unknown>;
+  _root: { data: Record<string, unknown> };
+}
+
 export async function createPdfkitWriter(options: { compress?: boolean } = {}): Promise<PdfWriter> {
   const { default: PDFDocument } = await import('pdfkit/js/pdfkit.standalone.js');
   const compress = options.compress ?? true;
@@ -260,9 +260,12 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
     imageSize,
 
     async write(pages, info) {
+      const needsPdf15 =
+        info.pageLayout === 'TwoPageLeft' || info.pageLayout === 'TwoPageRight';
       const doc = new PDFDocument({
         autoFirstPage: false,
         compress,
+        ...(needsPdf15 ? { pdfVersion: '1.5' as const } : info.language !== undefined ? { pdfVersion: '1.4' as const } : {}),
         ...(info.language !== undefined && { lang: info.language }),
         info: {
           ...(info.title !== undefined && { Title: info.title }),
@@ -275,6 +278,7 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
         },
       });
       const internals = doc as unknown as PdfKitInternals;
+      // PDFKit injects Creator: 'PDFKit' when unset; its public options do not expose catalog viewer preferences.
       if (info.creator === undefined) delete internals.info.Creator;
       if (info.pageMode !== undefined) internals._root.data.PageMode = info.pageMode;
       if (info.pageLayout !== undefined) internals._root.data.PageLayout = info.pageLayout;
