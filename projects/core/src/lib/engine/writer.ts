@@ -349,7 +349,7 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
         internals.info.Creator = escapeXml(creatorTool);
         addInfo.call(doc);
         internals.metadata._metadata = internals.metadata._metadata.replace(
-          /<pdf:Producer>[\\s\\S]*?<\\/pdf:Producer>/,
+          /<pdf:Producer>[\s\S]*?<\/pdf:Producer>/,
           () => `<pdf:Producer>${escapeXml(info.producer)}</pdf:Producer>`,
         );
         Object.assign(internals.info, originalInfo);

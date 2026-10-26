@@ -272,7 +272,7 @@ describe('createPdfkitWriter', () => {
       language: 'en-US',
     });
     const pdf = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
-    const xmp = pdf.match(/<\\?xpacket begin="[\\s\\S]*?<\\?xpacket end="w"\\?>/)?.[0];
+    const xmp = pdf.match(/<\?xpacket begin="[\s\S]*?<\?xpacket end="w"\?>/)?.[0];
 
     expect(xmp).toBeDefined();
     expect(xmp).toContain('R&amp;D &lt;Reports&gt;');
