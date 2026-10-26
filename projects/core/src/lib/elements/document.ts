@@ -11,6 +11,13 @@ export class PdfDocument {
   readonly subject = input<string>();
   readonly keywords = input<readonly string[]>();
   readonly creationDate = input<Date>();
+  readonly language = input<string>();
+  readonly creator = input<string>();
+  readonly producer = input<string>();
+  readonly pageMode = input<'UseNone' | 'UseThumbs' | 'FullScreen'>();
+  readonly pageLayout = input<
+    'SinglePage' | 'OneColumn' | 'TwoColumnLeft' | 'TwoColumnRight' | 'TwoPageLeft' | 'TwoPageRight'
+  >();
 
   constructor() {
     (inject(ElementRef).nativeElement as PdfNode).owner = this;
@@ -23,6 +30,11 @@ export class PdfDocument {
       subject: this.subject(),
       keywords: this.keywords(),
       creationDate: this.creationDate(),
+      language: this.language(),
+      creator: this.creator(),
+      producer: this.producer(),
+      pageMode: this.pageMode(),
+      pageLayout: this.pageLayout(),
     };
   }
 }

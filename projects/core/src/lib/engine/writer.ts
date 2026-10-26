@@ -73,6 +73,17 @@ export interface DocumentInfo {
   readonly author?: string;
   readonly subject?: string;
   readonly keywords?: readonly string[];
+  readonly language?: string;
+  readonly creator?: string;
+  readonly producer: string;
+  readonly pageMode?: 'UseNone' | 'UseThumbs' | 'FullScreen';
+  readonly pageLayout?:
+    | 'SinglePage'
+    | 'OneColumn'
+    | 'TwoColumnLeft'
+    | 'TwoColumnRight'
+    | 'TwoPageLeft'
+    | 'TwoPageRight';
   readonly creationDate: Date;
 }
 
@@ -220,6 +231,11 @@ interface FontInternals {
   _font: { ascender: number };
 }
 
+interface PdfKitInternals {
+  info: Record<string, unknown>;
+  _root: { data: Record<string, unknown> };
+}
+
 export async function createPdfkitWriter(options: { compress?: boolean } = {}): Promise<PdfWriter> {
   const { default: PDFDocument } = await import('pdfkit/js/pdfkit.standalone.js');
   const compress = options.compress ?? true;
@@ -247,14 +263,21 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
       const doc = new PDFDocument({
         autoFirstPage: false,
         compress,
+        ...(info.language !== undefined && { lang: info.language }),
         info: {
           ...(info.title !== undefined && { Title: info.title }),
           ...(info.author !== undefined && { Author: info.author }),
           ...(info.subject !== undefined && { Subject: info.subject }),
           ...(info.keywords !== undefined && { Keywords: info.keywords.join(', ') }),
+          ...(info.creator !== undefined && { Creator: info.creator }),
+          Producer: info.producer,
           CreationDate: info.creationDate,
         },
       });
+      const internals = doc as unknown as PdfKitInternals;
+      if (info.creator === undefined) delete internals.info.Creator;
+      if (info.pageMode !== undefined) internals._root.data.PageMode = info.pageMode;
+      if (info.pageLayout !== undefined) internals._root.data.PageLayout = info.pageLayout;
       const chunks: Uint8Array[] = [];
       const done = new Promise<Blob>((resolve, reject) => {
         doc.on('data', (chunk: Uint8Array) => chunks.push(chunk));

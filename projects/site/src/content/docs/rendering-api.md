@@ -16,6 +16,25 @@ order: 10
 | `pdfResource` | yes, or pass `injector` | `PdfResourceRef` |
 | `PdfDownload` | no, it is a directive | - |
 
+## pdf-document metadata
+
+The `pdf-document` component accepts these optional metadata inputs in addition to `title`,
+`author`, `subject`, `keywords` and `creationDate`.
+
+| Input | Type | PDF output |
+| --- | --- | --- |
+| `language` | `string` | Canonical BCP 47 language tag in the catalog's `/Lang`, e.g. `en-US` |
+| `creator` | `string` | `/Creator`; omitted when unset |
+| `producer` | `string` | `/Producer`; defaults to `ngpdf` |
+| `pageMode` | `'UseNone' \| 'UseThumbs' \| 'FullScreen'` | Catalog viewer hint `/PageMode` |
+| `pageLayout` | `'SinglePage' \| 'OneColumn' \| 'TwoColumnLeft' \| 'TwoColumnRight' \| 'TwoPageLeft' \| 'TwoPageRight'` | Catalog viewer hint `/PageLayout` |
+
+Language tags are canonicalized with `Intl.getCanonicalLocales`; malformed tags throw
+`ngpdf: invalid language "<tag>"`. Unsupported page modes or layouts throw
+`ngpdf: invalid pageMode "<value>"` or `ngpdf: invalid pageLayout "<value>"`. Omitted viewer hints
+are left out of the PDF catalog so the viewer can choose its defaults. These options apply to both
+template rendering and `renderToBlob`.
+
 ## PdfRenderer
 
 ```ts

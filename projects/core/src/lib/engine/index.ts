@@ -46,6 +46,18 @@ function findDocument(node: PdfNode): PdfNode | undefined {
   return undefined;
 }
 
+function enumValue<const T extends string>(
+  value: unknown,
+  name: 'pageMode' | 'pageLayout',
+  allowed: readonly T[],
+): T | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !allowed.includes(value)) {
+    throw new Error(`ngpdf: invalid ${name} "${String(value)}"`);
+  }
+  return value;
+}
+
 function infoOf(document: PdfNode, now: Date): DocumentInfo {
   const props = propsOf(document);
   const text = (name: string): string | undefined => {
@@ -57,11 +69,35 @@ function infoOf(document: PdfNode, now: Date): DocumentInfo {
   const subject = text('subject');
   const keywords = props['keywords'];
   const date = props['creationDate'];
+  const language = text('language');
+  let canonicalLanguage: string | undefined;
+  if (language !== undefined) {
+    try {
+      canonicalLanguage = Intl.getCanonicalLocales(language)[0];
+    } catch {
+      throw new Error(`ngpdf: invalid language "${language}"`);
+    }
+    if (canonicalLanguage === undefined) throw new Error(`ngpdf: invalid language "${language}"`);
+  }
+  const pageMode = enumValue(props['pageMode'], 'pageMode', ['UseNone', 'UseThumbs', 'FullScreen']);
+  const pageLayout = enumValue(props['pageLayout'], 'pageLayout', [
+    'SinglePage',
+    'OneColumn',
+    'TwoColumnLeft',
+    'TwoColumnRight',
+    'TwoPageLeft',
+    'TwoPageRight',
+  ]);
   return {
     ...(title !== undefined && { title }),
     ...(author !== undefined && { author }),
     ...(subject !== undefined && { subject }),
     ...(Array.isArray(keywords) && { keywords: keywords as readonly string[] }),
+    ...(canonicalLanguage !== undefined && { language: canonicalLanguage }),
+    ...(text('creator') !== undefined && { creator: text('creator') }),
+    producer: text('producer') ?? 'ngpdf',
+    ...(pageMode !== undefined && { pageMode }),
+    ...(pageLayout !== undefined && { pageLayout }),
     creationDate: date instanceof Date ? date : now,
   };
 }
