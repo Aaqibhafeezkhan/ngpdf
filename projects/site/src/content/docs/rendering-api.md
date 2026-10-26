@@ -16,25 +16,6 @@ order: 10
 | `pdfResource` | yes, or pass `injector` | `PdfResourceRef` |
 | `PdfDownload` | no, it is a directive | - |
 
-## pdf-document metadata
-
-The `pdf-document` component accepts these optional metadata inputs in addition to `title`,
-`author`, `subject`, `keywords` and `creationDate`.
-
-| Input | Type | PDF output |
-| --- | --- | --- |
-| `language` | `string` | Canonical BCP 47 language tag in the catalog's `/Lang`, e.g. `en-US` |
-| `creator` | `string` | `/Creator`; omitted when unset |
-| `producer` | `string` | `/Producer`; defaults to `ngpdf` |
-| `pageMode` | `'UseNone' \| 'UseThumbs' \| 'FullScreen'` | Catalog viewer hint `/PageMode` |
-| `pageLayout` | `'SinglePage' \| 'OneColumn' \| 'TwoColumnLeft' \| 'TwoColumnRight' \| 'TwoPageLeft' \| 'TwoPageRight'` | Catalog viewer hint `/PageLayout` |
-
-Language tags are canonicalized with `Intl.getCanonicalLocales`; malformed tags throw
-`ngpdf: invalid language "<tag>"`. Unsupported page modes or layouts throw
-`ngpdf: invalid pageMode "<value>"` or `ngpdf: invalid pageLayout "<value>"`. Omitted viewer hints
-are left out of the PDF catalog so the viewer can choose its defaults. These options apply to both
-template rendering and `renderToBlob`.
-
 ## PdfRenderer
 
 ```ts
@@ -193,6 +174,9 @@ The returned promise rejects with an `Error`. Errors from ngpdf start with `ngpd
 | `ngpdf: no pdf-document in the rendered component` | The template has no `pdf-document`. |
 | `ngpdf: pdf-document has no pdf-page` | The document has no `pdf-page` child. |
 | `ngpdf: unknown page size "<size>" on pdf-page` | A size name that does not exist, or a pair that is not two positive numbers. |
+| `ngpdf: invalid language "<tag>"` or `ngpdf: invalid language ""` | The language input is not a valid BCP 47 tag; empty strings are invalid. |
+| `ngpdf: invalid pageMode "<value>"` | An unsupported `pageMode` value. |
+| `ngpdf: invalid pageLayout "<value>"` | An unsupported `pageLayout` value. |
 | `ngpdf: invalid color "<value>" on <element>` | A color in a form ngpdf does not read. |
 | `ngpdf: unknown unit in "<value>" on <element>` | A unit other than `pt`, `px`, `in`, `cm`, `mm` or `%`. |
 | `ngpdf: invalid length "<value>" on <element>` | A length that does not start with a number. |
