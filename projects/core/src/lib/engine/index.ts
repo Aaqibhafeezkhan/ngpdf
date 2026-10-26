@@ -22,9 +22,17 @@ import {
 } from './writer';
 import type { Yoga } from 'yoga-layout/load';
 
-import { PAGE_LAYOUTS, PAGE_MODES } from '../document-metadata';
-export { PAGE_LAYOUTS, PAGE_MODES };
-export type { PageLayout, PageMode } from '../document-metadata';
+import type { PageLayout, PageMode } from '../elements/document';
+
+const PAGE_MODES = ['UseNone', 'UseThumbs', 'FullScreen'] as const satisfies readonly PageMode[];
+const PAGE_LAYOUTS = [
+  'SinglePage',
+  'OneColumn',
+  'TwoColumnLeft',
+  'TwoColumnRight',
+  'TwoPageLeft',
+  'TwoPageRight',
+] as const satisfies readonly PageLayout[];
 
 declare const ngDevMode: unknown;
 

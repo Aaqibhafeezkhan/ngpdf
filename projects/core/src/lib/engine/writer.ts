@@ -1,4 +1,4 @@
-import type { PageLayout, PageMode } from '../document-metadata';
+import type { PageLayout, PageMode } from '../elements/document';
 export type StandardFont =
   | 'Helvetica'
   | 'Helvetica-Bold'
@@ -239,8 +239,8 @@ interface FontInternals {
 }
 
 interface PdfKitInternals {
-  info: Record<string, unknown>;
-  _root: { data: Record<string, unknown> };
+  info: { Creator?: unknown };
+  _root: { data: { PageMode?: PageMode; PageLayout?: PageLayout } };
 }
 
 export async function createPdfkitWriter(options: { compress?: boolean } = {}): Promise<PdfWriter> {
@@ -287,16 +287,16 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
     imageSize,
 
     async write(pages, info) {
-      const needsPdf15 =
-        info.pageLayout === 'TwoPageLeft' || info.pageLayout === 'TwoPageRight';
+      const pdfVersion =
+        info.pageLayout === 'TwoPageLeft' || info.pageLayout === 'TwoPageRight'
+          ? '1.5'
+          : info.language !== undefined
+            ? '1.4'
+            : undefined;
       const doc = new PDFDocument({
         autoFirstPage: false,
         compress,
-        ...(needsPdf15
-          ? { pdfVersion: '1.5' as const }
-          : info.language !== undefined
-            ? { pdfVersion: '1.4' as const }
-            : {}),
+        ...(pdfVersion !== undefined && { pdfVersion }),
         ...(info.language !== undefined && { lang: info.language }),
         info: {
           ...(info.title !== undefined && { Title: info.title }),
