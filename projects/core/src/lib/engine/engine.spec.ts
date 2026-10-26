@@ -110,6 +110,13 @@ describe('renderDocument', () => {
     ).rejects.toThrow(message);
   });
 
+  it('rejects an empty language tag and non-string language values', async () => {
+    await expect(renderDocument(twoPages({ language: '' }), { writer: recordingWriter(), dev: false }))
+      .rejects.toThrow('ngpdf: invalid language ""');
+    await expect(renderDocument(twoPages({ language: 42 }), { writer: recordingWriter(), dev: false }))
+      .rejects.toThrow('ngpdf: invalid language');
+  });
+
   it('numbers page-number text across all pages of the document', async () => {
     const writer = recordingWriter();
     const number = el('pdf-page-number', {}, [], { format: '{page}/{total}' });
