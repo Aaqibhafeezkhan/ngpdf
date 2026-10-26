@@ -160,9 +160,9 @@ const info = {
 };
 
 function infoString(pdf: string, key: 'Creator' | 'Producer'): string | undefined {
-  const reference = pdf.match(new RegExp(`/\${key}\\s+(\\d+)\\s+0\\s+R`));
+  const reference = pdf.match(new RegExp(`/${key}\\\\s+(\\\\d+)\\\\s+0\\\\s+R`));
   if (!reference) return undefined;
-  const object = pdf.match(new RegExp(`\\b\${reference[1]}\\s+0\\s+obj\\s*\\((.*?)\\)\\s*endobj`, 's'));
+  const object = pdf.match(new RegExp(`\\\\b${reference[1]}\\\\s+0\\\\s+obj\\\\s*\\\\((.*?)\\\\)\\\\s+endobj`, 's'));
   return object?.[1];
 }
 
