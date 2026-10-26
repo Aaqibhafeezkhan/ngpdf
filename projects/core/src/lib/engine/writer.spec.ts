@@ -260,6 +260,30 @@ describe('createPdfkitWriter', () => {
     expect(parsed.querySelector('parsererror')).toBeNull();
   });
 
+  it('escapes standard metadata in XMP without changing PDF Info values', async () => {
+    const title = 'R&D <Reports>';
+    const author = 'A&B';
+    const blob = await writer.write([{ ...A4, ops: [] }], {
+      ...info,
+      title,
+      author,
+      subject: 'Research & Development',
+      keywords: ['R&D', 'finance'],
+      language: 'en-US',
+    });
+    const pdf = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
+    const xmp = pdf.match(/<\\?xpacket begin="[\\s\\S]*?<\\?xpacket end="w"\\?>/)?.[0];
+
+    expect(xmp).toBeDefined();
+    expect(xmp).toContain('R&amp;D &lt;Reports&gt;');
+    expect(xmp).toContain('A&amp;B');
+    expect(xmp).toContain('Research &amp; Development');
+    expect(xmp).toContain('R&amp;D, finance');
+    expect(new DOMParser().parseFromString(xmp!, 'application/xml').querySelector('parsererror')).toBeNull();
+    expect(pdf).toContain('/Title (R&D <Reports>)');
+    expect(pdf).toContain('/Author (A&B)');
+  });
+
   it('uses the producer in XMP when creator is unset', async () => {
     const blob = await writer.write([{ ...A4, ops: [] }], {
       ...info,

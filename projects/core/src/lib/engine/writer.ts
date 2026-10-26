@@ -333,15 +333,26 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
       // Correct its XMP generation while leaving the PDF Info dictionary's creator value unchanged.
       const addInfo = internals._addInfo;
       internals._addInfo = () => {
-        const creator = internals.info.Creator;
-        const creatorTool = typeof creator === 'string' ? creator : info.producer;
+        const originalInfo = {
+          Creator: internals.info.Creator,
+          Title: internals.info.Title,
+          Author: internals.info.Author,
+          Subject: internals.info.Subject,
+          Keywords: internals.info.Keywords,
+        };
+        const creatorTool =
+          typeof originalInfo.Creator === 'string' ? originalInfo.Creator : info.producer;
+        for (const key of ['Title', 'Author', 'Subject', 'Keywords'] as const) {
+          const value = internals.info[key];
+          if (typeof value === 'string') internals.info[key] = escapeXml(value);
+        }
         internals.info.Creator = escapeXml(creatorTool);
         addInfo.call(doc);
         internals.metadata._metadata = internals.metadata._metadata.replace(
-          /<pdf:Producer>[\s\S]*?<\/pdf:Producer>/,
-          `<pdf:Producer>${escapeXml(info.producer)}</pdf:Producer>`,
+          /<pdf:Producer>[\\s\\S]*?<\\/pdf:Producer>/,
+          () => `<pdf:Producer>${escapeXml(info.producer)}</pdf:Producer>`,
         );
-        internals.info.Creator = creator;
+        Object.assign(internals.info, originalInfo);
       };
       // PDFKit injects Creator: 'PDFKit' when unset; its public options do not expose catalog viewer preferences.
       if (info.creator === undefined) delete internals.info.Creator;
