@@ -43,6 +43,11 @@ The root of a document. It holds `pdf-page` elements and the PDF's metadata.
 | `subject` | `string` | `undefined` | The PDF's Subject. |
 | `keywords` | `readonly string[]` | `undefined` | The PDF's Keywords, joined with `", "`. |
 | `creationDate` | `Date` | `undefined` | The PDF's CreationDate. When unset, the time of the render is used. |
+| `language` | `string` | `undefined` | Canonical BCP 47 language tag written as `/Lang`. Empty or invalid values are errors. |
+| `creator` | `string` | `undefined` | Application attribution in `/Creator`; omitted when unset. |
+| `producer` | `string` | `'ngpdf'` | The PDF producer recorded in the metadata. |
+| `pageMode` | `PageMode` | `undefined` | Initial viewer mode: `UseNone`, `UseThumbs` or `FullScreen`. |
+| `pageLayout` | `PageLayout` | `undefined` | Initial layout: `SinglePage`, `OneColumn`, `TwoColumnLeft`, `TwoColumnRight`, `TwoPageLeft` or `TwoPageRight`. |
 
 Only its `pdf-page` children are rendered. Its text styles are inherited by every page. See [Documents and pages](/docs/documents-and-pages).
 
