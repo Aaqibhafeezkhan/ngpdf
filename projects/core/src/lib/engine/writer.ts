@@ -243,11 +243,6 @@ interface PdfKitInternals {
   _root: { data: Record<string, unknown> };
 }
 
-interface FontInternals {
-  info: Record<string, unknown>;
-  _root: { data: Record<string, unknown> };
-}
-
 export async function createPdfkitWriter(options: { compress?: boolean } = {}): Promise<PdfWriter> {
   const { default: PDFDocument } = await import('pdfkit/js/pdfkit.standalone.js');
   const compress = options.compress ?? true;
