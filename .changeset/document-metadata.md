@@ -2,5 +2,4 @@
 '@ngpdf/core': minor
 ---
 
-Add optional language, creator, producer, page mode and page layout metadata to `pdf-document`.
-Validate language tags and viewer preference values, and default the PDF producer to `ngpdf`.
+Add optional document language, application attribution and initial page-view preferences to generated PDFs. Language tags and viewer preferences are validated, and the PDF producer metadata now identifies ngpdf instead of PDFKit.
