@@ -14,6 +14,14 @@ import { TextMeasureCache } from './text';
 import { createPdfkitWriter, type DocumentInfo, type PageOps, type PdfWriter } from './writer';
 import type { Yoga } from 'yoga-layout/load';
 
+export const PAGE_MODES = ['UseNone', 'UseThumbs', 'FullScreen'] as const;
+export type PageMode = (typeof PAGE_MODES)[number];
+
+export const PAGE_LAYOUTS = [
+  'SinglePage', 'OneColumn', 'TwoColumnLeft', 'TwoColumnRight', 'TwoPageLeft', 'TwoPageRight',
+] as const;
+export type PageLayout = (typeof PAGE_LAYOUTS)[number];
+
 declare const ngDevMode: unknown;
 
 export interface RenderDocumentOptions {
@@ -46,16 +54,28 @@ function findDocument(node: PdfNode): PdfNode | undefined {
   return undefined;
 }
 
-function enumValue<const T extends string>(
+function enumValue<T extends string>(
   value: unknown,
   name: 'pageMode' | 'pageLayout',
   allowed: readonly T[],
 ): T | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== 'string' || !allowed.includes(value)) {
+  if (typeof value !== 'string' || !allowed.includes(value as T)) {
     throw new Error(`ngpdf: invalid ${name} "${String(value)}"`);
   }
-  return value;
+  return value as T;
+}
+
+function languageOf(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new Error('ngpdf: invalid language');
+  try {
+    const language = Intl.getCanonicalLocales(value)[0];
+    if (language === undefined) throw new Error();
+    return language;
+  } catch {
+    throw new Error(`ngpdf: invalid language "${value}"`);
+  }
 }
 
 function infoOf(document: PdfNode, now: Date): DocumentInfo {
@@ -67,35 +87,21 @@ function infoOf(document: PdfNode, now: Date): DocumentInfo {
   const title = text('title');
   const author = text('author');
   const subject = text('subject');
+  const creator = text('creator');
+  const producer = text('producer');
   const keywords = props['keywords'];
   const date = props['creationDate'];
-  const language = text('language');
-  let canonicalLanguage: string | undefined;
-  if (language !== undefined) {
-    try {
-      canonicalLanguage = Intl.getCanonicalLocales(language)[0];
-    } catch {
-      throw new Error(`ngpdf: invalid language "${language}"`);
-    }
-    if (canonicalLanguage === undefined) throw new Error(`ngpdf: invalid language "${language}"`);
-  }
-  const pageMode = enumValue(props['pageMode'], 'pageMode', ['UseNone', 'UseThumbs', 'FullScreen']);
-  const pageLayout = enumValue(props['pageLayout'], 'pageLayout', [
-    'SinglePage',
-    'OneColumn',
-    'TwoColumnLeft',
-    'TwoColumnRight',
-    'TwoPageLeft',
-    'TwoPageRight',
-  ]);
+  const language = languageOf(props['language']);
+  const pageMode = enumValue(props['pageMode'], 'pageMode', PAGE_MODES);
+  const pageLayout = enumValue(props['pageLayout'], 'pageLayout', PAGE_LAYOUTS);
   return {
     ...(title !== undefined && { title }),
     ...(author !== undefined && { author }),
     ...(subject !== undefined && { subject }),
     ...(Array.isArray(keywords) && { keywords: keywords as readonly string[] }),
-    ...(canonicalLanguage !== undefined && { language: canonicalLanguage }),
-    ...(text('creator') !== undefined && { creator: text('creator') }),
-    producer: text('producer') ?? 'ngpdf',
+    ...(language !== undefined && { language }),
+    ...(creator !== undefined && { creator }),
+    producer: producer ?? 'ngpdf',
     ...(pageMode !== undefined && { pageMode }),
     ...(pageLayout !== undefined && { pageLayout }),
     creationDate: date instanceof Date ? date : now,
