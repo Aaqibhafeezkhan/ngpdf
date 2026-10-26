@@ -1,5 +1,6 @@
 import { Component, ElementRef, inject, input } from '@angular/core';
 import type { PdfNode } from '../tree/node';
+import type { PageLayout, PageMode } from '../engine';
 
 @Component({
   selector: 'pdf-document',
@@ -15,9 +16,7 @@ export class PdfDocument {
   readonly creator = input<string>();
   readonly producer = input<string>();
   readonly pageMode = input<'UseNone' | 'UseThumbs' | 'FullScreen'>();
-  readonly pageLayout = input<
-    'SinglePage' | 'OneColumn' | 'TwoColumnLeft' | 'TwoColumnRight' | 'TwoPageLeft' | 'TwoPageRight'
-  >();
+  readonly pageLayout = input<PageLayout>();
 
   constructor() {
     (inject(ElementRef).nativeElement as PdfNode).owner = this;
