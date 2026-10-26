@@ -1,4 +1,4 @@
-import type { PageLayout, PageMode } from './index';
+import type { PageLayout, PageMode } from '../document-metadata';
 export type StandardFont =
   | 'Helvetica'
   | 'Helvetica-Bold'
@@ -304,6 +304,7 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
           CreationDate: info.creationDate,
         },
       });
+      for (const [name, data] of registered) doc.registerFont(name, data);
       const internals = doc as unknown as PdfKitInternals;
       // PDFKit injects Creator: 'PDFKit' when unset; its public options do not expose catalog viewer preferences.
       if (info.creator === undefined) delete internals.info.Creator;
