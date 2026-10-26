@@ -51,7 +51,7 @@ export class MetaDocument {
 | `pageMode` | `PageMode` | Initial viewer mode: `UseNone`, `UseThumbs` or `FullScreen`. |
 | `pageLayout` | `PageLayout` | Initial layout: `SinglePage`, `OneColumn`, `TwoColumnLeft`, `TwoColumnRight`, `TwoPageLeft` or `TwoPageRight`. |
 
-An input you leave unset is not written. Pass a fixed `creationDate` when you need the same bytes for the same data, for example in snapshot tests: it is the only time source in a render.
+Unset metadata inputs are omitted, except `producer`, which defaults to `ngpdf`, and `creationDate`, which defaults to the time of the render. Pass a fixed `creationDate` when you need the same bytes for the same data, for example in snapshot tests: it is the only time source in a render.
 
 Rules for the document:
 
