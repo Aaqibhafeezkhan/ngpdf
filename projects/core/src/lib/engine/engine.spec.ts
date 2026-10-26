@@ -115,6 +115,17 @@ describe('renderDocument', () => {
     ).rejects.toThrow(message);
   });
 
+  it.each([
+    ['pageMode', null],
+    ['pageMode', 42],
+    ['pageLayout', null],
+    ['pageLayout', 42],
+  ])('rejects non-string %s values (%s)', async (key, value) => {
+    await expect(
+      renderDocument(twoPages({ [key]: value }), { writer: recordingWriter(), dev: false }),
+    ).rejects.toThrow(`ngpdf: invalid ${key}`);
+  });
+
   it('rejects an empty language tag and non-string language values', async () => {
     await expect(renderDocument(twoPages({ language: '' }), { writer: recordingWriter(), dev: false }))
       .rejects.toThrow('ngpdf: invalid language ""');
