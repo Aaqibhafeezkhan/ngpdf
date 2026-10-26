@@ -159,6 +159,13 @@ const info = {
   producer: 'ngpdf',
 };
 
+function infoString(pdf: string, key: 'Creator' | 'Producer'): string | undefined {
+  const reference = pdf.match(new RegExp(`/\${key}\\s+(\\d+)\\s+0\\s+R`));
+  if (!reference) return undefined;
+  const object = pdf.match(new RegExp(`\\b\${reference[1]}\\s+0\\s+obj\\s*\\((.*?)\\)\\s*endobj`, 's'));
+  return object?.[1];
+}
+
 describe('createPdfkitWriter', () => {
   let writer: PdfWriter;
   beforeAll(async () => {
@@ -215,8 +222,8 @@ describe('createPdfkitWriter', () => {
     });
     const pdf = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
     expect(pdf).toContain('/Lang (en-US)');
-    expect(pdf).toContain('/Creator (Report App)');
-    expect(pdf).toContain('/Producer (ngpdf)');
+    expect(infoString(pdf, 'Creator')).toBe('Report App');
+    expect(infoString(pdf, 'Producer')).toBe('ngpdf');
     expect(pdf).toContain('/PageMode /FullScreen');
     expect(pdf).toContain('/PageLayout /TwoColumnLeft');
   });
@@ -224,8 +231,8 @@ describe('createPdfkitWriter', () => {
   it('omits an unset creator', async () => {
     const blob = await writer.write([{ ...A4, ops: [] }], { ...info });
     const pdf = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
-    expect(pdf).toContain('/Producer (ngpdf)');
-    expect(pdf).not.toContain('/Creator');
+    expect(infoString(pdf, 'Producer')).toBe('ngpdf');
+    expect(infoString(pdf, 'Creator')).toBeUndefined();
   });
 
   it('declares the PDF version required by language and two-page layout entries', async () => {
