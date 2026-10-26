@@ -1,6 +1,6 @@
 import { Component, ElementRef, inject, input } from '@angular/core';
 import type { PdfNode } from '../tree/node';
-import type { PageLayout, PageMode } from '../engine';
+import type { PageLayout, PageMode } from '../document-metadata';
 
 @Component({
   selector: 'pdf-document',
