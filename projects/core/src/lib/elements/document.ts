@@ -15,7 +15,7 @@ export class PdfDocument {
   readonly language = input<string>();
   readonly creator = input<string>();
   readonly producer = input<string>();
-  readonly pageMode = input<'UseNone' | 'UseThumbs' | 'FullScreen'>();
+  readonly pageMode = input<PageMode>();
   readonly pageLayout = input<PageLayout>();
 
   constructor() {
