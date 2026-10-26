@@ -221,10 +221,26 @@ describe('createPdfkitWriter', () => {
   });
 
   it('omits an unset creator', async () => {
-    const blob = await writer.write([{ ...A4, ops: [] }], { ...info, producer: 'ngpdf' });
+    const blob = await writer.write([{ ...A4, ops: [] }], { ...info });
     const pdf = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
     expect(pdf).toContain('/Producer (ngpdf)');
     expect(pdf).not.toContain('/Creator');
+  });
+
+  it('declares the PDF version required by language and two-page layout entries', async () => {
+    const languageBlob = await writer.write([{ ...A4, ops: [] }], {
+      ...info, language: 'en-US',
+    });
+    const languagePdf = new TextDecoder('latin1').decode(new Uint8Array(await languageBlob.arrayBuffer()));
+    expect(languagePdf).toMatch(/^%PDF-1\.4/);
+    expect(languagePdf).toContain('/Lang (en-US)');
+
+    const layoutBlob = await writer.write([{ ...A4, ops: [] }], {
+      ...info, pageLayout: 'TwoPageLeft',
+    });
+    const layoutPdf = new TextDecoder('latin1').decode(new Uint8Array(await layoutBlob.arrayBuffer()));
+    expect(layoutPdf).toMatch(/^%PDF-1\.5/);
+    expect(layoutPdf).toContain('/PageLayout /TwoPageLeft');
   });
 
   it('draws lines, strike text, images and one page per entry', async () => {
