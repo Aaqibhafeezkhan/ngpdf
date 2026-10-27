@@ -240,26 +240,7 @@ interface FontInternals {
 
 interface PdfKitInternals {
   info: { Creator?: unknown };
-  metadata: { _metadata: string };
-  _addInfo(): void;
   _root: { data: { PageMode?: PageMode; PageLayout?: PageLayout } };
-}
-
-function escapeXml(value: string): string {
-  return value.replace(/[<>&"']/g, (character) => {
-    switch (character) {
-      case '<':
-        return '&lt;';
-      case '>':
-        return '&gt;';
-      case '&':
-        return '&amp;';
-      case '"':
-        return '&quot;';
-      default:
-        return '&apos;';
-    }
-  });
 }
 
 export async function createPdfkitWriter(options: { compress?: boolean } = {}): Promise<PdfWriter> {
@@ -306,16 +287,9 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
     imageSize,
 
     async write(pages, info) {
-      const pdfVersion =
-        info.pageLayout === 'TwoPageLeft' || info.pageLayout === 'TwoPageRight'
-          ? '1.5'
-          : info.language !== undefined
-            ? '1.4'
-            : undefined;
       const doc = new PDFDocument({
         autoFirstPage: false,
         compress,
-        ...(pdfVersion !== undefined && { pdfVersion }),
         ...(info.language !== undefined && { lang: info.language }),
         info: {
           ...(info.title !== undefined && { Title: info.title }),
@@ -329,32 +303,7 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
       });
       for (const [name, data] of registered) doc.registerFont(name, data);
       const internals = doc as unknown as PdfKitInternals;
-      // PDFKit uses info.Creator for both XMP CreatorTool and pdf:Producer, and inserts values as raw XML.
-      // Correct its XMP generation while leaving the PDF Info dictionary's creator value unchanged.
-      const addInfo = internals._addInfo;
-      internals._addInfo = () => {
-        const originalInfo = {
-          Creator: internals.info.Creator,
-          Title: internals.info.Title,
-          Author: internals.info.Author,
-          Subject: internals.info.Subject,
-          Keywords: internals.info.Keywords,
-        };
-        const creatorTool =
-          typeof originalInfo.Creator === 'string' ? originalInfo.Creator : info.producer;
-        for (const key of ['Title', 'Author', 'Subject', 'Keywords'] as const) {
-          const value = internals.info[key];
-          if (typeof value === 'string') internals.info[key] = escapeXml(value);
-        }
-        internals.info.Creator = escapeXml(creatorTool);
-        addInfo.call(doc);
-        internals.metadata._metadata = internals.metadata._metadata.replace(
-          /<pdf:Producer>[\s\S]*?<\/pdf:Producer>/,
-          () => `<pdf:Producer>${escapeXml(info.producer)}</pdf:Producer>`,
-        );
-        Object.assign(internals.info, originalInfo);
-      };
-      // PDFKit injects Creator: 'PDFKit' when unset; its public options do not expose catalog viewer preferences.
+      // PDFKit injects Creator: 'PDFKit' when unset and has no public viewer-preference options.
       if (info.creator === undefined) delete internals.info.Creator;
       if (info.pageMode !== undefined) internals._root.data.PageMode = info.pageMode;
       if (info.pageLayout !== undefined) internals._root.data.PageLayout = info.pageLayout;
