@@ -109,11 +109,11 @@ The site (`projects/site`) is a prerendered Angular app. Its docs are the Markdo
   - Only the faces of families a document names are loaded, so an unused broken font never fails
     a render.
 - **Tables:**
-  - Columns are declared on the table: `[columns]` with points, `'Nfr'` or `'N%'`.
-  - Column widths are resolved in this order: fixed widths first, then percentages, then `fr`
-    shares of what is left.
+  - Columns are declared on the table: `[columns]` with points, `'Nfr'`, `'N%'` or `'auto'`.
+  - Column widths are resolved in this order: fixed widths first, then percentages, then `auto`
+    columns at their widest one-line cell content (shrunk in proportion if they overflow), then
+    `fr` shares of what is left. Spanning cells don't size `auto` columns.
   - A `pdf-cell` takes its column's width by position, and `span` merges columns.
-  - Content-sized columns are v0.2.
 - **Pagination:**
   - Units are the children of a page, at any depth through column `pdf-view`s and tables. A table
     yields its rows as units. A row `pdf-view` is one unit.
@@ -122,14 +122,17 @@ The site (`projects/site`) is a prerendered Angular app. Its docs are the Markdo
     A short text, `break-inside: avoid`, a fixed `height` or a `max-height` keeps it one unit.
   - A `header` row repeats at the top of every page its table runs onto.
   - `breakBefore` starts a new page.
-  - `pdf-page-number` reserves its height at the bottom of the content area.
+  - `pdf-page-number` as a direct child of `pdf-page` reserves its height at the bottom of the
+    content area. Anywhere else it is a one-line leaf, measured with three-digit numbers and drawn
+    with the numbers of the sheet it lands on.
   - A `pdf-view` with `fixed="top"` or `fixed="bottom"`, a direct child of `pdf-page`, is laid
     out once and drawn on every sheet; the flow gets the space between them. Bottom views sit
     above the page number.
   - A unit taller than a page goes on a page of its own, is clipped, and gets a dev-mode warning.
   - Wrapper backgrounds and borders are sliced per page.
 - **Text wrapping:** text wraps at Unicode line-break opportunities. A word wider than its box breaks
-  at the box edge.
+  at the box edge. `max-lines` keeps at most N lines of a `pdf-text`; when text was cut, the last
+  line ends with `…` in the face of its last run, or `...` in a font without `…`.
 - **Styled runs:** a `pdf-span` inside a `pdf-text` changes only `color`, `font-family`,
   `font-size`, `font-weight`, `font-style` and `text-decoration`. The paragraph breaks as one text,
   and runs of different sizes share a baseline. A `pdf-span` outside a `pdf-text` throws.
@@ -140,7 +143,7 @@ The site (`projects/site`) is a prerendered Angular app. Its docs are the Markdo
 - **Out of v0.1:**
   - server rendering;
   - SVG, links, bookmarks;
-  - hyphenation, justify, RTL;
+  - hyphenation, RTL;
   - forms, encryption;
   - a preview component;
   - capturing the DOM.

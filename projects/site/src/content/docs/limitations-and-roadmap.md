@@ -16,7 +16,7 @@ ngpdf v0.1 covers documents built from text, tables, boxes and images. This page
 - Text sits at the top of its line box: extra `line-height` goes below the text, not half above and half below as in CSS.
 - A bare number is in points, except in `line-height`, where it multiplies the font size as in CSS (`line-height: 1.4`). Write `line-height: 14pt` for points.
 - Bare text inside an element other than `pdf-text` (`<pdf-cell>{{ x }}</pdf-cell>`) is laid out as an anonymous `pdf-text` with its parent's text styles.
-- No hyphenation, no justified text, no right-to-left text.
+- No hyphenation and no right-to-left text. Justified text widens only the gaps between words, never the space between letters.
 
 ### Layout and styling
 
@@ -25,7 +25,6 @@ ngpdf v0.1 covers documents built from text, tables, boxes and images. This page
 - `opacity` multiplies down the tree: a faded view's children are each faded, not composited as one group, so overlapping children show through each other.
 - A box cannot fill the remaining height of a page. Use a fixed height.
 - Your own components inside a document are transparent, like `display: contents`. Styles on a component's host element are ignored with a warning. Style a `pdf-*` element inside it instead. The same goes for the document component you render.
-- Keywords are case-sensitive.
 
 ### Tables
 
@@ -35,7 +34,6 @@ ngpdf v0.1 covers documents built from text, tables, boxes and images. This page
 
 ### Pagination
 
-- `pdf-page-number` always sits at the bottom of the content area.
 - A unit taller than a page (a row, or a `pdf-view` in a column) is clipped to its page. So is a `pdf-text` that stays one unit: one inside a row, or one with `break-inside: avoid`, a fixed `height` or `max-height`, or fewer than `orphans + widows` lines. Other text breaks between lines instead.
 
 ### Images
@@ -60,8 +58,6 @@ These items are in the [v0.2 roadmap](https://github.com/ngpdf/ngpdf/blob/main/d
 - Fill the remaining page height.
 - Group opacity, so a faded view is composited as one.
 - Half-leading: extra line height split above and below the text, as in CSS.
-- Content-sized table columns (`auto`).
-- A positioned page number.
 - Rounded borders that follow `border-radius`.
 - Table headers: a warning or a fix when a header is dropped or too tall to repeat, and `breakBefore` kept on header rows.
 
@@ -76,7 +72,6 @@ These items are in the [v0.2 roadmap](https://github.com/ngpdf/ngpdf/blob/main/d
 
 ### Robustness
 
-- Keywords matched case-insensitively, with one policy for unknown keywords.
-- `thin`, `medium` and `thick` border widths, and negative border widths rejected.
+- One policy for unknown keywords, fallback or throw (still to be decided). Today `font-weight` and `font-style` fall back to `normal`, `break-before` and `break-inside` ignore them, and the other keyword properties throw.
 
 Ideas and bug reports are welcome on [GitHub issues](https://github.com/ngpdf/ngpdf/issues).

@@ -398,13 +398,13 @@ describe('paginatePage: page number', () => {
     expect(pages[0]!.pageNumber!.box.style.textAlign).toBe('center');
   });
 
-  it('warns about a pdf-page-number below a direct child and does not place it', () => {
+  it('leaves a pdf-page-number below a direct child in the flow, without a warning', () => {
     const nested = pageNumber();
     const warn = vi.fn<(message: string) => void>();
     const pages = paginate(page([el('pdf-view', {}, [el('pdf-view', {}, [nested])])]), warn);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith('ngpdf: pdf-page-number must be a direct child of pdf-page');
+    expect(warn).not.toHaveBeenCalled();
     expect(pages[0]!.pageNumber).toBeUndefined();
+    expect(pages[0]!.placed).toHaveLength(1);
   });
 
   it('is the same on every page', () => {
@@ -594,6 +594,13 @@ describe('paginatePage: text split across pages', () => {
     const pieces = textPieces(pages[0]!);
     expect(pieces[0]!.y).toBeCloseTo(CONTENT_TOP + AREA - 35, 3);
     expect(bottom(pieces.at(-1)!)).toBeCloseTo(CONTENT_TOP + AREA - 5, 3);
+  });
+
+  it('splits a text cut by max-lines between its kept lines only', () => {
+    const pages = paginate(page([filler(35), paragraph(10, { 'max-lines': '6' })]));
+    expect(pages).toHaveLength(2);
+    expect(linesOn(pages[0]!)).toEqual(['w0', 'w1', 'w2']);
+    expect(linesOn(pages[1]!)).toEqual(['w3', 'w4', 'w5…']);
   });
 
   it('leaves at least orphans lines at the bottom of a page', () => {

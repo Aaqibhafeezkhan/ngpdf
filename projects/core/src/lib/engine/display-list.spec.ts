@@ -163,6 +163,73 @@ describe('displayList', () => {
     ]);
   });
 
+  describe('text-align: justify', () => {
+    const words = 'one two three four five six seven eight nine ten';
+    const gapsOf = (line: string) => line.split(' ').length - 1;
+
+    it('stretches the word gaps of every line but the last to the content width', () => {
+      const box = text(words, { 'text-align': 'justify', width: '120', padding: '0 10' });
+      const [laid] = layout(page([box]));
+      const lines = laid!.placed[0]!.box.text!.lines;
+      expect(lines.length).toBeGreaterThan(1);
+      const ops = only(list(laid!, 0, 1), 'text');
+      for (const [i, line] of lines.entries()) {
+        const op = ops[i]!;
+        expect(op.x).toBe(46);
+        if (line.last) {
+          expect(op.wordSpacing ?? 0).toBe(0);
+        } else {
+          expect(op.wordSpacing).toBeCloseTo((100 - line.width) / gapsOf(line.text), 6);
+        }
+      }
+    });
+
+    it('leaves a line without gaps and an overflowing word at the start', () => {
+      const box = text('Antidisestablishment end', { 'text-align': 'justify', width: '40' });
+      const ops = only(list(layout(page([box]))[0]!, 0, 1), 'text');
+      expect(ops.length).toBeGreaterThan(1);
+      for (const op of ops) {
+        expect(op.x).toBe(36);
+        expect(op.wordSpacing ?? 0).toBe(0);
+      }
+    });
+
+    it('moves each run right by the gaps before it, across pdf-spans', () => {
+      const bold = el('pdf-span', { 'font-weight': 'bold' });
+      const run = createNode('text', '', 'two three');
+      run.parent = bold;
+      bold.children.push(run);
+      const paragraph = el('pdf-text', { 'text-align': 'justify', width: '100' }, [
+        createNode('text', '', 'one '),
+        bold,
+        createNode('text', '', ' four five six seven eight'),
+      ]);
+      for (const child of paragraph.children) child.parent = paragraph;
+      const [laid] = layout(page([paragraph]));
+      const first = laid!.placed[0]!.box.text!.lines[0]!;
+      const ops = only(list(laid!, 0, 1), 'text').slice(0, first.runs.length);
+      const gaps = gapsOf(first.text);
+      const spacing = (100 - first.width) / gaps;
+      expect(ops.map((op) => op.text)).toEqual(first.runs.map((r) => r.text));
+      expect(ops[0]).toMatchObject({ x: 36, wordSpacing: spacing });
+      // 'one ' ends with a gap, so the bold run starts one spacing further right.
+      expect(ops[1]!.x).toBeCloseTo(36 + first.runs[1]!.x + spacing, 6);
+      expect(ops[2]!.x).toBeCloseTo(36 + first.runs[2]!.x + 2 * spacing, 6);
+    });
+
+    it('keeps the last line of each piece of a split paragraph justified unless it ends the text', () => {
+      const lines = Array.from({ length: 6 }, () => 'aa bb').join(' ');
+      const box = text(lines, { 'text-align': 'justify', width: '30', 'line-height': '1' });
+      const filler = el('pdf-view', { height: String(841.89 - 72 - 30) });
+      const pages = layout(page([filler, box]));
+      expect(pages).toHaveLength(2);
+      const firstPage = only(list(pages[0]!, 0, 2), 'text');
+      expect(firstPage.length).toBeGreaterThan(0);
+      for (const op of firstPage) expect(op.wordSpacing).toBeGreaterThan(0);
+      expect(only(list(pages[1]!, 1, 2), 'text').at(-1)!.wordSpacing ?? 0).toBe(0);
+    });
+  });
+
   it('draws each pdf-span run in its own size, color and decoration on one baseline', () => {
     const span = (style: Record<string, string>, content: string): PdfNode => {
       const node = el('pdf-span', style);
@@ -199,6 +266,39 @@ describe('displayList', () => {
     expect(last.text).toBe('Página 2 de 5');
     // Right-aligned by default, inside the padding.
     expect(last.x).toBeCloseTo(595.28 - 36 - writer.widthOf('Página 2 de 5', 'Helvetica', 10), 3);
+  });
+
+  it('draws a nested page number with the numbers of the sheet it lands on', () => {
+    const number = el('pdf-page-number', {}, [], { format: 'p{page}/{total}' });
+    const [first] = layout(page([text('a'), el('pdf-view', {}, [number])]));
+    expect(first!.pageNumber).toBeUndefined();
+    expect(only(list(first!, 2, 7), 'text').map((op) => op.text)).toEqual(['a', 'p3/7']);
+  });
+
+  it('draws a page number in a fixed view on every sheet', () => {
+    const header = el(
+      'pdf-view',
+      {},
+      [el('pdf-page-number', {}, [], { format: 'Page {page} of {total}' })],
+      {
+        fixed: 'top',
+      },
+    );
+    const blocks = [el('pdf-view', { height: '500' }), el('pdf-view', { height: '500' })];
+    const sheets = layout(page([header, ...blocks]));
+    expect(sheets).toHaveLength(2);
+    const numbers = sheets.map((sheet, i) => only(list(sheet, i, sheets.length), 'text')[0]?.text);
+    expect(numbers).toEqual(['Page 1 of 2', 'Page 2 of 2']);
+  });
+
+  it('aligns a nested page number inside its box by text-align', () => {
+    const number = el('pdf-page-number', { width: '100', 'text-align': 'right' }, [], {
+      format: '{page}',
+    });
+    const [first] = layout(page([el('pdf-view', { 'flex-direction': 'row' }, [number])]));
+    const [op] = only(list(first!, 0, 1), 'text');
+    expect(op!.x).toBeCloseTo(36 + 100 - writer.widthOf('1', 'Helvetica', 10), 3);
+    expect(op!.y).toBeCloseTo(36, 3);
   });
 
   it('reads the format from the page number props and replaces every placeholder', () => {

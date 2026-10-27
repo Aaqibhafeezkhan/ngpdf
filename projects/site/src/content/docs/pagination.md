@@ -40,6 +40,7 @@ A `pdf-text` that is a unit by the rules above, as a child of the page or of a c
 ```
 
 - `orphans` is the fewest lines left at the bottom of a page before the break, and `widows` the fewest carried to the top of the next. Both are integers of at least 1, are inherited, and default to 2.
+- A text cut by `max-lines` splits the same way, over the lines it keeps.
 - A text with fewer than `orphans + widows` lines moves to the next page whole, as do texts with `break-inside: avoid`, a fixed `height` or a `max-height`.
 - A text longer than a page continues over as many pages as it needs. The first `orphans` and last `widows` lines always stay together. Lines are placed one by one between them, so a page in the middle of the text can end up with fewer than `orphans` lines only when its lines are so tall that fewer than `orphans + widows` of them fit on a page, such as a very large `pdf-span`.
 - Its top padding and border stay with its first lines, the bottom ones with its last lines. A background or border is sliced like a [wrapper's](#wrapper-backgrounds-and-borders).
@@ -104,11 +105,11 @@ Give a `pdf-view` that is a direct child of `pdf-page` the `fixed` input to draw
 - A fixed view is never a pagination unit: it is not split, moved or clipped, and `breakBefore` inside it does nothing.
 - Fixed views that leave no room for content fail the render with `ngpdf: fixed views leave no room for content on pdf-page`.
 - A `fixed` view nested deeper than a direct child of `pdf-page` is laid out as an ordinary view where it is, and logs `ngpdf: a fixed pdf-view must be a direct child of pdf-page` in development mode: inside the flow it stays in the flow, and inside a fixed view it repeats with that view.
-- The content of a fixed view is the same on every sheet. Page numbers inside a fixed view are planned.
+- The content of a fixed view is the same on every sheet, except a `pdf-page-number` inside it, which shows each sheet's number (see [Page numbers](#page-numbers)).
 
 ## Page numbers
 
-Put a `pdf-page-number` directly inside a `pdf-page`:
+A `pdf-page-number` shows the sheet's number. Put it directly inside a `pdf-page` to reserve the bottom of every sheet for it:
 
 ```html
 <pdf-page style="padding: 48">
@@ -121,10 +122,24 @@ Put a `pdf-page-number` directly inside a `pdf-page`:
 - It sits at the bottom of the content area, inside the page padding, across the content width, on every sheet that `pdf-page` produces. It is taken out of the flow wherever you write it among the page's children.
 - It reserves its height on every sheet: one line of its font (`font-size × line-height`) plus its own vertical padding and borders, or its `height` if you set one. Content and bottom fixed views stop above it.
 - It is right-aligned unless it, or an element above it, sets `text-align`.
-- Text styles apply: `font-size`, `color`, `font-weight` and the rest. Other position styles are ignored; a positioned page number is planned for v0.2.
+- Text styles apply: `font-size`, `color`, `font-weight` and the rest. Other position styles are ignored.
 - The text is drawn on one line and does not wrap. Content you put inside the element is ignored.
-- A `pdf-page` without a `pdf-page-number` shows no number. Only the first `pdf-page-number` of a page is used.
-- A `pdf-page-number` nested deeper than a direct child of `pdf-page` draws nothing and logs `ngpdf: pdf-page-number must be a direct child of pdf-page` in development mode.
+- Only the first `pdf-page-number` among the direct children of a `pdf-page` reserves the bottom; other direct children are ignored. Page numbers placed anywhere else are drawn too.
+
+### Anywhere else
+
+A `pdf-page-number` that is not a direct child of `pdf-page` is laid out where you write it, like a one-line `pdf-text`, and shows the numbers of the sheet it is drawn on. In a fixed header, that is every sheet:
+
+```html
+<pdf-view fixed="top" style="flex-direction: row">
+  <pdf-text style="flex: 1; font-weight: bold">Stock count</pdf-text>
+  <pdf-page-number format="Sheet {page} of {total}" />
+</pdf-view>
+```
+
+- The layout is done once for all sheets, so its box is measured with every `{page}` and `{total}` taken as three digits. The drawn text is aligned inside that box by `text-align`, so a number that grows from 9 to 10 does not move what is next to it.
+- In the flow, it shows the number of the sheet its unit lands on. `{total}` is always the number of sheets in the whole document.
+- Inside a `pdf-text` it is flattened like any other element there; put it next to the text instead, for example in a row `pdf-view`.
 
 ## Warnings
 

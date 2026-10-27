@@ -1,6 +1,6 @@
 import LineBreaker from 'linebreak';
 import type { Color } from './color';
-import { fontFor, normalizeText, shapeText } from './fonts';
+import { covers, fontFor, normalizeText, shapeText } from './fonts';
 import type { TextStyle } from './style';
 import type { FontMetrics, FontName } from './writer';
 
@@ -27,6 +27,8 @@ export interface TextLine {
   readonly height: number;
   /** The baseline, below `y`: the largest ascent of the line's runs. */
   readonly ascent: number;
+  /** The paragraph's last line, which `text-align: justify` leaves at the start. */
+  readonly last: boolean;
   readonly runs: readonly TextRun[];
 }
 
@@ -44,10 +46,21 @@ export interface TextRange {
   readonly fonts?: TextFonts;
 }
 
+/** What applies to a paragraph as a whole: its line height and an optional line limit. */
+export type ParagraphStyle = TextStyle & {
+  /** The most lines kept; the last ends in an ellipsis when text was cut. */
+  readonly maxLines?: number | null;
+};
+
 export interface TextBlock {
   readonly lines: readonly TextLine[];
   readonly width: number;
   readonly height: number;
+}
+
+/** The word gaps in `text` that justified text widens: runs of spaces and no-break spaces, as in CSS. */
+export function wordGaps(text: string): number {
+  return text.match(/[ \u00a0]+/g)?.length ?? 0;
 }
 
 const MAX_TEXT_LENGTH = 1_048_576;
@@ -55,6 +68,9 @@ const MAX_TEXT_LENGTH = 1_048_576;
 const MEASURE_MODE_UNDEFINED = 0;
 // How far over `maxWidth` the summed character widths may be and still be tried by measuring.
 const KERNING_SLACK = 1.25;
+const ELLIPSIS = '…';
+// For a font without U+2026.
+const ELLIPSIS_DOTS = '...';
 
 function assertTextSize(ranges: readonly TextRange[]): void {
   let length = 0;
@@ -283,11 +299,11 @@ function shapeRanges(ranges: readonly TextRange[], metrics: FontMetrics): Shaped
 /**
  * `layoutText` for a paragraph made of ranges in different styles, such as text with pdf-spans.
  * The paragraph breaks as one text, so a range boundary is not a break opportunity; each range is
- * measured in its own fonts and size. `paragraph` gives the line height.
+ * measured in its own fonts and size. `paragraph` gives the line height and the line limit.
  */
 export function layoutRanges(
   ranges: readonly TextRange[],
-  paragraph: TextStyle,
+  paragraph: ParagraphStyle,
   maxWidth: number,
   metrics: FontMetrics,
   warn: (chars: string[]) => void = () => undefined,
@@ -295,12 +311,16 @@ export function layoutRanges(
 ): TextBlock {
   assertTextSize(ranges);
   const text = ranges.length === 1 ? (ranges[0]?.text ?? '') : ranges.map((r) => r.text).join('');
-  const key = `${ranges.map(rangeKey).join(';')} ${String(paragraph.lineHeight)} ${String(maxWidth)}`;
+  const maxLines = paragraph.maxLines ?? Infinity;
+  const key = `${ranges.map(rangeKey).join(';')} ${String(paragraph.lineHeight)} ${String(maxWidth)} ${String(maxLines)}`;
   const { block, replaced, missing } = cache.block(text, key, () => {
     const shaped = shapeRanges(ranges, metrics);
     const widthOfs = shaped.faces.map((face) => cache.widthOf(metrics, face.font, face.size));
+    const ellipses = shaped.faces.map((face) =>
+      covers(face.font, ELLIPSIS, metrics) ? ELLIPSIS : ELLIPSIS_DOTS,
+    );
     return {
-      block: breakLines(shaped, paragraph.lineHeight, maxWidth, widthOfs),
+      block: breakLines(shaped, paragraph.lineHeight, maxWidth, widthOfs, maxLines, ellipses),
       replaced: shaped.replaced,
       missing: shaped.missing,
     };
@@ -311,12 +331,17 @@ export function layoutRanges(
   return block;
 }
 
-/** The lines of the shaped text in `maxWidth`; see `layoutText`. */
+/**
+ * The lines of the shaped text in `maxWidth`; see `layoutText`. Past `maxLines`, the last line is
+ * shortened until its text plus the ellipsis of its last face fits.
+ */
 function breakLines(
   shaped: ShapedRanges,
   lineHeight: number,
   maxWidth: number,
   widthOfs: readonly ((chunk: string) => number)[],
+  maxLines: number,
+  ellipses: readonly string[],
 ): TextBlock {
   const { text: collapsed, faces, faceAt: fontAt, clusterStarts } = shaped;
   const length = collapsed.length;
@@ -359,6 +384,34 @@ function breakLines(
   };
   const widthOfRange = (start: number, end: number): number =>
     runsOf(start, end).reduce((sum, run) => sum + run.width, 0);
+
+  /** `end` without the spaces before it, down to `start`. */
+  const keptEnd = (start: number, end: number): number => {
+    let kept = end;
+    while (kept > start && collapsed.charCodeAt(kept - 1) === 32) kept--;
+    return kept;
+  };
+  /** The face the ellipsis takes after `[start, end)`: its last kept character's, or `fallback`. */
+  const ellipsisFace = (start: number, end: number, fallback: number): number => {
+    const kept = keptEnd(start, end);
+    return kept > start ? (fontAt[kept - 1] ?? fallback) : fallback;
+  };
+  /** The runs of `[start, end)` without its trailing spaces, then the ellipsis in face `index`. */
+  const runsWithEllipsis = (start: number, end: number, index: number): TextRun[] => {
+    const kept = keptEnd(start, end);
+    const runs = runsOf(start, kept);
+    const ellipsis = ellipses[index] ?? ELLIPSIS;
+    const face = faces[index] ?? faces[0];
+    const last = runs.at(-1);
+    if (last && fontAt[kept - 1] === index) {
+      const text = last.text + ellipsis;
+      runs[runs.length - 1] = { ...last, text, width: widthIn(index, text) };
+    } else if (face) {
+      const x = last ? last.x + last.width : 0;
+      runs.push({ ...face, text: ellipsis, x, width: widthIn(index, ellipsis) });
+    }
+    return runs;
+  };
 
   /** The end of the text to draw for a line `[start, end)`: a trailing space is not drawn. */
   const drawnEnd = (end: number): number => (collapsed.charCodeAt(end - 1) === 32 ? end - 1 : end);
@@ -416,23 +469,54 @@ function breakLines(
       else end = cut(first + 1);
     }
 
-    const runs = runsOf(start, drawnEnd(end));
+    let runs = runsOf(start, drawnEnd(end));
+    // The paragraph's ends are trimmed, so anything after `end` is text that gets cut.
+    const clamped = lines.length + 1 >= maxLines && end < length;
+    if (clamped) {
+      const fallback = fontAt[drawnEnd(end) - 1] ?? 0;
+      const widthWith = (k: number, face: number): number =>
+        runsWithEllipsis(start, cut(k), face).reduce((sum, run) => sum + run.width, 0);
+      // The ellipsis takes the face of the last kept character, so a cut that ends in a smaller
+      // face can fit where a shorter one did not. With the face fixed, width only grows with the
+      // cut, so each face gets its own search over the cuts that end in it.
+      const cutsByFace = new Map<number, number[]>();
+      for (let k = cutIndex(start); k <= cutIndex(drawnEnd(end)); k++) {
+        const face = ellipsisFace(start, cut(k), fallback);
+        const cuts = cutsByFace.get(face) ?? [];
+        cuts.push(k);
+        cutsByFace.set(face, cuts);
+      }
+      let best = -1;
+      let bestFace = fallback;
+      for (const [face, cuts] of cutsByFace) {
+        const i = lastWhere(0, cuts.length - 1, (j) => widthWith(cuts[j] ?? 0, face) <= maxWidth);
+        const k = cuts[i] ?? -1;
+        if (k > best) [best, bestFace] = [k, face];
+      }
+      // A box narrower than the ellipsis gets an empty line rather than one that overflows.
+      runs = best >= 0 ? runsWithEllipsis(start, cut(best), bestFace) : [];
+    }
+    // An empty cut line keeps the height of the text it replaces.
+    const sized = runs.length > 0 ? runs : runsOf(start, drawnEnd(end));
     let size = 0;
     let ascent = 0;
-    for (const run of runs) {
+    for (const run of sized) {
       size = Math.max(size, run.size);
       ascent = Math.max(ascent, run.ascent);
     }
     const height = size * lineHeight;
     lines.push({
-      text: collapsed.slice(start, drawnEnd(end)),
+      text: runs.map((run) => run.text).join(''),
       width: runs.reduce((sum, run) => sum + run.width, 0),
       y: top,
       height,
       ascent,
+      // The text is trimmed, so only the last line reaches its end.
+      last: end === length || clamped,
       runs,
     });
     top += height;
+    if (clamped) break;
     start = end;
   }
 
@@ -457,7 +541,7 @@ export function measureText(
 /** `measureText` for a paragraph made of ranges; see `layoutRanges`. */
 export function measureRanges(
   ranges: readonly TextRange[],
-  paragraph: TextStyle,
+  paragraph: ParagraphStyle,
   metrics: FontMetrics,
   cache: TextMeasureCache = new TextMeasureCache(),
 ): (width: number, widthMode: number) => { width: number; height: number } {

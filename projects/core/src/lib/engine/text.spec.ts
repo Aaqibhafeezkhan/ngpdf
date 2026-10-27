@@ -49,6 +49,12 @@ describe('layoutText', () => {
     expect(block.width).toBe(Math.max(...block.lines.map((line) => line.width)));
   });
 
+  it('marks only the last line of the paragraph as last', () => {
+    const block = layoutText('Gabriela Teixeira de Albuquerque Cavalcanti', style, 120, writer);
+    expect(block.lines.map((line) => line.last)).toEqual([false, true]);
+    expect(layoutText('Ana', style, 120, writer).lines.map((line) => line.last)).toEqual([true]);
+  });
+
   it('collapses runs of whitespace into one space', () => {
     const block = layoutText('a   b\n c', style, 500, writer);
     expect(block.lines.map((line) => line.text)).toEqual(['a b c']);
@@ -514,5 +520,128 @@ describe('layoutRanges', () => {
   it('rejects ranges over 1 MB in total', () => {
     const half = 'a'.repeat(524_289);
     expect(() => lay([range(half), range(half)])).toThrow('ngpdf: text longer than 1 MB');
+  });
+});
+
+describe('layoutRanges with maxLines', () => {
+  let writer: PdfWriter;
+  beforeAll(async () => {
+    writer = await createPdfkitWriter({ compress: false });
+    writer.registerFont('font:0', testFont('inter-basic.otf'));
+  });
+  const text = 'Gabriela Teixeira de Albuquerque Cavalcanti mora em Recife desde 2019';
+  const clamped = (maxLines: number | null, maxWidth = 120, ranges?: readonly TextRange[]) =>
+    layoutRanges(ranges ?? [{ text, style }], { ...style, maxLines }, maxWidth, writer);
+
+  it('keeps every line when the text fits in maxLines', () => {
+    const all = clamped(null);
+    expect(clamped(all.lines.length)).toEqual(all);
+  });
+
+  it('keeps maxLines lines and measures only those', () => {
+    const block = clamped(2);
+    expect(block.lines).toHaveLength(2);
+    expect(block.height).toBe(27);
+  });
+
+  it('ends the last kept line with an ellipsis that fits the box', () => {
+    const all = clamped(null);
+    const [, second] = clamped(2).lines;
+    const kept = second?.text.slice(0, -1) ?? '';
+    expect(second?.text.endsWith('…')).toBe(true);
+    expect(second?.width).toBeLessThanOrEqual(120);
+    expect(kept).toBe(kept.trimEnd());
+    expect(all.lines[1]?.text.startsWith(kept)).toBe(true);
+    expect(second?.width).toBeCloseTo(writer.widthOf(second?.text ?? '', 'Helvetica', 9), 6);
+  });
+
+  it('cuts characters off the last line until the ellipsis fits', () => {
+    // At 30pt the first line is a piece of "Gabriela", which leaves no room for the ellipsis.
+    const full = clamped(null, 30).lines[0]?.text ?? '';
+    const [line] = clamped(1, 30).lines;
+    expect(line?.width).toBeLessThanOrEqual(30);
+    expect(line?.text.endsWith('…')).toBe(true);
+    const kept = line?.text.slice(0, -1) ?? '';
+    expect(kept.length).toBeLessThan(full.length);
+    expect(writer.widthOf(`${text.slice(0, kept.length + 1)}…`, 'Helvetica', 9)).toBeGreaterThan(
+      30,
+    );
+  });
+
+  it('draws the ellipsis in the style of the last run on the line', () => {
+    const bold: TextStyle = { ...style, fontWeight: 'bold' };
+    const [line] = clamped(1, 120, [
+      { text: 'Status: ', style },
+      { text: 'aprovado sem ressalvas pela comissão', style: bold },
+    ]).lines;
+    const last = line?.runs.at(-1);
+    expect(last?.font).toBe('Helvetica-Bold');
+    expect(last?.text.endsWith('…')).toBe(true);
+  });
+
+  it('draws the ellipsis in the style of the last kept run when the cut removes a whole run', () => {
+    const bold: TextStyle = { ...style, fontWeight: 'bold' };
+    // The box holds "Status aprovado x" with 2pt to spare, so the ellipsis fits only once "x" is gone.
+    const maxWidth =
+      writer.widthOf('Status aprovado ', 'Helvetica', 9) +
+      writer.widthOf('x', 'Helvetica-Bold', 9) +
+      2;
+    const [line] = clamped(1, maxWidth, [
+      { text: 'Status aprovado ', style },
+      { text: 'x', style: bold },
+      { text: ' com ressalvas', style },
+    ]).lines;
+    expect(line?.text).toBe('Status aprovado…');
+    expect(line?.runs.map((run) => run.font)).toEqual(['Helvetica']);
+    expect(line?.width).toBeCloseTo(writer.widthOf('Status aprovado…', 'Helvetica', 9), 6);
+  });
+
+  it('draws nothing when not even the ellipsis fits the box, keeping the line height', () => {
+    const block = clamped(1, 3);
+    expect(block.lines[0]?.text).toBe('');
+    expect(block.width).toBe(0);
+    expect(block.height).toBe(clamped(1, 10).height);
+  });
+
+  it('finds the longest cut when a smaller face after a large one makes the ellipsis narrower', () => {
+    // Each character is as wide as its font size: "QX…" is 9 + 60 + 60 = 129pt, "QXa…" 87pt.
+    const sized: FontMetrics = {
+      widthOf: (chunk, _font, size) => size * chunk.length,
+      ascent: () => 0,
+      hasGlyph: () => false,
+    };
+    const big: TextStyle = { ...style, fontSize: 60 };
+    const ranges = [
+      { text: 'Q', style },
+      { text: 'X', style: big },
+      { text: 'a bbbbbbbb', style },
+    ];
+    const [line] = layoutRanges(ranges, { ...style, maxLines: 1 }, 88, sized).lines;
+    expect(line?.text).toBe('QXa…');
+    expect(line?.width).toBe(87);
+  });
+
+  it('marks a cut line as the last, so justify leaves it alone', () => {
+    const lines = clamped(2).lines;
+    expect(lines.map((line) => line.last)).toEqual([false, true]);
+  });
+
+  it('falls back to three dots when the font has no ellipsis', () => {
+    const [line] = clamped(1, 120, [{ text, style, fonts: { chain: ['font:0'] } }]).lines;
+    expect(line?.text.endsWith('...')).toBe(true);
+    expect(line?.width).toBeLessThanOrEqual(120);
+  });
+
+  it('keeps the ellipsis alone when not even one character fits beside it', () => {
+    const [line] = clamped(1, 10).lines;
+    expect(line?.text).toBe('…');
+  });
+
+  it('does not reuse a block cached without the limit', () => {
+    const cache = new TextMeasureCache();
+    const lay = (maxLines: number | null) =>
+      layoutRanges([{ text, style }], { ...style, maxLines }, 120, writer, undefined, cache);
+    expect(lay(null).lines.length).toBeGreaterThan(2);
+    expect(lay(2).lines).toHaveLength(2);
   });
 });
