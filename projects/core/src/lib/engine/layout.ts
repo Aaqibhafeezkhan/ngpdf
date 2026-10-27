@@ -258,6 +258,12 @@ function sizeImage(
   }
 }
 
+/** The format of a pdf-page-number: its `format` prop, or the default. */
+export function pageNumberFormat(node: PdfNode): string {
+  const format = propsOf(node)['format'];
+  return typeof format === 'string' ? format : '{page} / {total}';
+}
+
 // Elements whose text is their own content (or that hold none), never wrapped in anonymous boxes.
 const LEAVES = new Set(['pdf-text', 'pdf-image', 'pdf-page-number']);
 
@@ -388,6 +394,13 @@ export function layoutBox(
   const ranges = new Map<PdfNode, readonly TextRange[]>();
   const rangesOf = (textNode: PdfNode): readonly TextRange[] => {
     let found = ranges.get(textNode);
+    if (!found && textNode.tag === 'pdf-page-number') {
+      // Laid out once for every sheet, so it is measured with three digits per number.
+      const style = styleFor(textNode);
+      const text = pageNumberFormat(textNode).replaceAll(/\{(?:page|total)\}/g, '000');
+      found = [{ text, style, ...withFonts(fontsOf(style)) }];
+      ranges.set(textNode, found);
+    }
     if (!found) {
       const out: TextRange[] = [];
       const visit = (node: PdfNode, style: ResolvedStyle): void => {
@@ -413,8 +426,10 @@ export function layoutBox(
     let measure = measures.get(textNode);
     if (!measure) {
       const inner = measureRanges(rangesOf(textNode), style, ctx.metrics, textCache);
+      // A page number is drawn on one line, so it is measured on one line whatever the width.
+      const oneLine = textNode.tag === 'pdf-page-number';
       measure = (available, mode) => {
-        const measured = inner(available, mode);
+        const measured = inner(available, oneLine ? yoga.MEASURE_MODE_UNDEFINED : mode);
         return { width: measured.width + WIDTH_SLACK, height: measured.height };
       };
       measures.set(textNode, measure);
@@ -445,7 +460,7 @@ export function layoutBox(
     const isText = current.tag === 'pdf-text';
     const built: Built = { node: current, yoga: yogaNode, children: [], isText };
 
-    if (isText) {
+    if (isText || current.tag === 'pdf-page-number') {
       yogaNode.setMeasureFunc(measureOf(current, style));
       return built;
     }
