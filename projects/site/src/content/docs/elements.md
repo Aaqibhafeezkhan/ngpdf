@@ -105,12 +105,12 @@ A table with declared columns.
 
 | Input | Type | Default | Description |
 | --- | --- | --- | --- |
-| `columns` | `readonly TableColumn[]` | required | One entry per column: a number of points, `` `${number}fr` `` or `` `${number}%` ``. |
+| `columns` | `readonly TableColumn[]` | required | One entry per column: a number of points, `` `${number}fr` ``, `` `${number}%` `` or `'auto'`. See [Columns](/docs/tables#columns). |
 
 `TableColumn` is an exported type:
 
 ```ts
-type TableColumn = number | `${number}fr` | `${number}%`;
+type TableColumn = number | `${number}fr` | `${number}%` | 'auto';
 ```
 
 Each row of the table is a pagination unit. See [Tables](/docs/tables).
