@@ -159,7 +159,23 @@ function imagePlacement(pdf: string): (u: number, v: number) => [number, number]
 }
 
 const A4 = { width: 595.28, height: 841.89 };
-const info = { title: 'Quarterly report', creationDate: new Date('2026-01-02T03:04:05Z') };
+const info = {
+  title: 'Quarterly report',
+  creationDate: new Date('2026-01-02T03:04:05Z'),
+  producer: 'ngpdf',
+};
+
+function infoString(pdf: string, key: 'Creator' | 'Producer'): string | undefined {
+  const reference = (
+    key === 'Creator' ? /\/Creator\s+(\d+)\s+0\s+R/ : /\/Producer\s+(\d+)\s+0\s+R/
+  ).exec(pdf);
+  if (!reference) return undefined;
+  const object = new RegExp(
+    `\\b${reference[1] ?? ''}\\s+0\\s+obj\\s*\\((.*?)\\)\\s+endobj`,
+    's',
+  ).exec(pdf);
+  return object?.[1];
+}
 
 describe('createPdfkitWriter', () => {
   let writer: PdfWriter;
@@ -241,6 +257,30 @@ describe('createPdfkitWriter', () => {
     expect(text).toContain('Helvetica-Bold');
     // Standard-font text is written as hex inside a TJ array.
     expect(text).toContain('<48656c6c6f20504446>');
+  });
+
+  it('writes document language, creator, producer and viewer preferences', async () => {
+    const blob = await writer.write([{ ...A4, ops: [] }], {
+      ...info,
+      language: 'en-US',
+      creator: 'Report App',
+      producer: 'ngpdf',
+      pageMode: 'FullScreen',
+      pageLayout: 'TwoColumnLeft',
+    });
+    const pdf = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
+    expect(pdf).toContain('/Lang (en-US)');
+    expect(infoString(pdf, 'Creator')).toBe('Report App');
+    expect(infoString(pdf, 'Producer')).toBe('ngpdf');
+    expect(pdf).toContain('/PageMode /FullScreen');
+    expect(pdf).toContain('/PageLayout /TwoColumnLeft');
+  });
+
+  it('omits an unset creator', async () => {
+    const blob = await writer.write([{ ...A4, ops: [] }], { ...info });
+    const pdf = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
+    expect(infoString(pdf, 'Producer')).toBe('ngpdf');
+    expect(infoString(pdf, 'Creator')).toBeUndefined();
   });
 
   it('draws lines, strike text, images and one page per entry', async () => {

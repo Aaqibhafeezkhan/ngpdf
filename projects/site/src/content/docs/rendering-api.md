@@ -174,6 +174,9 @@ The returned promise rejects with an `Error`. Errors from ngpdf start with `ngpd
 | `ngpdf: no pdf-document in the rendered component` | The template has no `pdf-document`. |
 | `ngpdf: pdf-document has no pdf-page` | The document has no `pdf-page` child. |
 | `ngpdf: unknown page size "<size>" on pdf-page` | A size name that does not exist, or a pair that is not two positive numbers. |
+| `ngpdf: invalid language "<tag>"` or `ngpdf: invalid language ""` | The language input is not a valid BCP 47 tag; empty strings are invalid. |
+| `ngpdf: invalid pageMode "<value>"` | An unsupported `pageMode` value. |
+| `ngpdf: invalid pageLayout "<value>"` | An unsupported `pageLayout` value. |
 | `ngpdf: invalid color "<value>" on <element>` | A color in a form ngpdf does not read. |
 | `ngpdf: unknown unit in "<value>" on <element>` | A unit other than `pt`, `px`, `in`, `cm`, `mm` or `%`. |
 | `ngpdf: invalid length "<value>" on <element>` | A length that does not start with a number. |

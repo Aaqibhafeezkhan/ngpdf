@@ -22,6 +22,18 @@ import {
 } from './writer';
 import type { Yoga } from 'yoga-layout/load';
 
+import type { PageLayout, PageMode } from '../tree/viewer-preferences';
+
+const PAGE_MODES = ['UseNone', 'UseThumbs', 'FullScreen'] as const satisfies readonly PageMode[];
+const PAGE_LAYOUTS = [
+  'SinglePage',
+  'OneColumn',
+  'TwoColumnLeft',
+  'TwoColumnRight',
+  'TwoPageLeft',
+  'TwoPageRight',
+] as const satisfies readonly PageLayout[];
+
 declare const ngDevMode: unknown;
 
 export interface RenderDocumentOptions {
@@ -101,6 +113,31 @@ function findDocument(node: PdfNode): PdfNode | undefined {
   return undefined;
 }
 
+function enumValue<T extends string>(
+  value: unknown,
+  name: 'pageMode' | 'pageLayout',
+  allowed: readonly T[],
+): T | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !allowed.includes(value as T)) {
+    const shown = typeof value === 'string' ? value : typeof value;
+    throw new Error(`ngpdf: invalid ${name} "${shown}"`);
+  }
+  return value as T;
+}
+
+function languageOf(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new Error('ngpdf: invalid language');
+  try {
+    const language = Intl.getCanonicalLocales(value)[0];
+    if (language === undefined) throw new Error();
+    return language;
+  } catch {
+    throw new Error(`ngpdf: invalid language "${value}"`);
+  }
+}
+
 function infoOf(document: PdfNode, now: Date): DocumentInfo {
   const props = propsOf(document);
   const text = (name: string): string | undefined => {
@@ -110,13 +147,23 @@ function infoOf(document: PdfNode, now: Date): DocumentInfo {
   const title = text('title');
   const author = text('author');
   const subject = text('subject');
+  const creator = text('creator');
+  const producer = text('producer');
   const keywords = props['keywords'];
   const date = props['creationDate'];
+  const language = languageOf(props['language']);
+  const pageMode = enumValue(props['pageMode'], 'pageMode', PAGE_MODES);
+  const pageLayout = enumValue(props['pageLayout'], 'pageLayout', PAGE_LAYOUTS);
   return {
     ...(title !== undefined && { title }),
     ...(author !== undefined && { author }),
     ...(subject !== undefined && { subject }),
     ...(Array.isArray(keywords) && { keywords: keywords as readonly string[] }),
+    ...(language !== undefined && { language }),
+    ...(creator !== undefined && { creator }),
+    producer: producer ?? 'ngpdf',
+    ...(pageMode !== undefined && { pageMode }),
+    ...(pageLayout !== undefined && { pageLayout }),
     creationDate: date instanceof Date ? date : now,
   };
 }

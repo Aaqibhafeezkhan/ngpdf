@@ -79,11 +79,21 @@ async function bytesOf(blob: Blob): Promise<string> {
 describe('renderDocument', () => {
   it('hands the writer every page and the document metadata', async () => {
     const writer = recordingWriter();
-    const props = { title: 'Report', author: 'Ana', subject: 'S', keywords: ['a', 'b'] };
+    const props = {
+      title: 'Report',
+      author: 'Ana',
+      subject: 'S',
+      keywords: ['a', 'b'],
+      language: 'en-us',
+      creator: 'Report App',
+      producer: 'Acme PDF',
+      pageMode: 'UseThumbs',
+      pageLayout: 'TwoPageRight',
+    };
     await renderDocument(twoPages(props), { writer, dev: false });
     const [{ pages, info }] = writer.recorded as [Recorded];
     expect(pages).toHaveLength(4);
-    expect(info).toMatchObject(props);
+    expect(info).toMatchObject({ ...props, language: 'en-US' });
     expect(pages[0]!.width).toBe(595.28);
     expect(pages[0]!.ops.some((op) => op.op === 'text' && op.text === 'single')).toBe(true);
   });
@@ -91,7 +101,41 @@ describe('renderDocument', () => {
   it('leaves unset metadata out of the info', async () => {
     const writer = recordingWriter();
     await renderDocument(twoPages(), { writer, dev: false });
-    expect(Object.keys(writer.recorded[0]!.info)).toEqual(['creationDate']);
+    expect(Object.keys(writer.recorded[0]!.info)).toEqual(['producer', 'creationDate']);
+    expect(writer.recorded[0]!.info.producer).toBe('ngpdf');
+  });
+
+  it.each([
+    ['language', 'not_a_locale', 'ngpdf: invalid language "not_a_locale"'],
+    ['pageMode', 'UseOutlines', 'ngpdf: invalid pageMode "UseOutlines"'],
+    ['pageLayout', 'InvalidLayout', 'ngpdf: invalid pageLayout "InvalidLayout"'],
+  ])('rejects an invalid %s', async (key, value, message) => {
+    await expect(
+      renderDocument(twoPages({ [key]: value }), { writer: recordingWriter(), dev: false }),
+    ).rejects.toThrow(message);
+  });
+
+  it.each([
+    ['pageMode', null],
+    ['pageMode', 42],
+    ['pageLayout', null],
+    ['pageLayout', 42],
+  ])('rejects non-string %s values (%s)', async (key, value) => {
+    await expect(
+      renderDocument(twoPages({ [key]: value }), { writer: recordingWriter(), dev: false }),
+    ).rejects.toThrow(`ngpdf: invalid ${key}`);
+  });
+
+  it('rejects an empty language tag and non-string language values', async () => {
+    await expect(
+      renderDocument(twoPages({ language: '' }), { writer: recordingWriter(), dev: false }),
+    ).rejects.toThrow('ngpdf: invalid language ""');
+    await expect(
+      renderDocument(twoPages({ language: 42 }), { writer: recordingWriter(), dev: false }),
+    ).rejects.toThrow('ngpdf: invalid language');
+    await expect(
+      renderDocument(twoPages({ language: null }), { writer: recordingWriter(), dev: false }),
+    ).rejects.toThrow('ngpdf: invalid language');
   });
 
   it('numbers page-number text across all pages of the document', async () => {

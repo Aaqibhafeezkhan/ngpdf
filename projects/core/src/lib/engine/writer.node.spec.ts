@@ -23,6 +23,7 @@ describe('createPdfkitWriter on pdfkit’s Node build', () => {
     const writer = await createPdfkitWriter({ compress: false });
     expect(writer.widthOf('Hello', 'Times-Roman', 10)).toBeCloseTo(22.22, 2);
     const blob = await writer.write([{ width: 100, height: 100, ops: [] }], {
+      producer: 'ngpdf',
       creationDate: new Date(0),
     });
     expect(blob.type).toBe('application/pdf');
