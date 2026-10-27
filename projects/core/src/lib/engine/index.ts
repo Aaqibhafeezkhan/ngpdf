@@ -22,7 +22,7 @@ import {
 } from './writer';
 import type { Yoga } from 'yoga-layout/load';
 
-import type { PageLayout, PageMode } from '../elements/document';
+import type { PageLayout, PageMode } from '../tree/viewer-preferences';
 
 const PAGE_MODES = ['UseNone', 'UseThumbs', 'FullScreen'] as const satisfies readonly PageMode[];
 const PAGE_LAYOUTS = [
@@ -120,7 +120,8 @@ function enumValue<T extends string>(
 ): T | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'string' || !allowed.includes(value as T)) {
-    throw new Error(`ngpdf: invalid ${name} "${String(value)}"`);
+    const shown = typeof value === 'string' ? value : typeof value;
+    throw new Error(`ngpdf: invalid ${name} "${shown}"`);
   }
   return value as T;
 }

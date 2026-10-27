@@ -1,15 +1,9 @@
 import { Component, ElementRef, inject, input } from '@angular/core';
 import type { PdfNode } from '../tree/node';
 
-export type PageMode = 'UseNone' | 'UseThumbs' | 'FullScreen';
+import type { PageLayout, PageMode } from '../tree/viewer-preferences';
 
-export type PageLayout =
-  | 'SinglePage'
-  | 'OneColumn'
-  | 'TwoColumnLeft'
-  | 'TwoColumnRight'
-  | 'TwoPageLeft'
-  | 'TwoPageRight';
+export type { PageLayout, PageMode };
 
 @Component({
   selector: 'pdf-document',

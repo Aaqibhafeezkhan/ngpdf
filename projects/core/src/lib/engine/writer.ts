@@ -1,4 +1,4 @@
-import type { PageLayout, PageMode } from '../elements/document';
+import type { PageLayout, PageMode } from '../tree/viewer-preferences';
 import Courier from 'pdfkit/standard-fonts/Courier';
 import CourierBold from 'pdfkit/standard-fonts/CourierBold';
 import CourierBoldOblique from 'pdfkit/standard-fonts/CourierBoldOblique';
