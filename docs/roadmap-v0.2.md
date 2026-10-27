@@ -41,9 +41,10 @@ it does not affect a correct document. Items that change behaviour need a design
 
 ## Robustness
 
-- **Keyword case.** `text-align: CENTER` throws and `font-weight: BOLD` falls back to normal;
-  keywords should be matched case-insensitively and trimmed, with one policy for unknown
-  keywords (fallback or throw).
+- **Unknown keywords.** Keywords are matched case-insensitively, but an unknown one throws for
+  `text-align` and the other `oneOf` properties, falls back to `normal` for `font-weight` and
+  `font-style`, and is ignored by `break-before` and `break-inside`; pick one policy (fallback or
+  throw).
 - The renderer factory applies `toKebab` to attribute names: an upper-case `STYLE` attribute
   would not be recognised. Lower-case attribute names instead.
 - Missing renderer edge tests: `--custom` properties, `!important`, `insertBefore` with a
