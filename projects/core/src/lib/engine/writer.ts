@@ -1,4 +1,5 @@
 import type { PageLayout, PageMode } from '../tree/viewer-preferences';
+import { graphemeStarts } from './graphemes';
 import type { Corners } from './style';
 import Courier from 'pdfkit/standard-fonts/Courier';
 import CourierBold from 'pdfkit/standard-fonts/CourierBold';
@@ -93,6 +94,8 @@ export type DrawOp =
       readonly strike: boolean;
       /** Width added to each word gap (a run of spaces and no-break spaces), for justified text. */
       readonly wordSpacing?: number;
+      /** Width added after each grapheme cluster, from `letter-spacing`. */
+      readonly letterSpacing?: number;
     }
   | {
       readonly op: 'image';
@@ -106,7 +109,8 @@ export type DrawOp =
     };
 
 export interface FontMetrics {
-  widthOf(text: string, font: FontName, size: number): number;
+  /** With `ligatures` false, the optional ligatures (liga, clig, dlig) are left out. */
+  widthOf(text: string, font: FontName, size: number, ligatures?: boolean): number;
   ascent(font: FontName, size: number): number;
   /** Whether a registered font has a glyph for the code point. */
   hasGlyph(font: CustomFont, codePoint: number): boolean;
@@ -347,8 +351,9 @@ export async function createPdfkitWriter(options: { compress?: boolean } = {}): 
       );
     },
 
-    widthOf(text, font, size) {
-      return measurer.font(font).fontSize(size).widthOfString(text);
+    widthOf(text, font, size, ligatures) {
+      const options = ligatures === false ? { features: NO_LIGATURES } : undefined;
+      return measurer.font(font).fontSize(size).widthOfString(text, options);
     },
 
     ascent(font, size) {
@@ -464,6 +469,53 @@ function drawWordSpaced(doc: Doc, op: Extract<DrawOp, { op: 'text' }>, spacing: 
   }
 }
 
+/**
+ * Letter-spaced text is drawn a cluster at a time, so a ligature across two clusters cannot form.
+ * It is measured without the optional ones, as CSS turns them off when letters are spaced.
+ * fontkit takes a feature object; pdfkit's types only know the list form.
+ */
+const NO_LIGATURES = {
+  liga: false,
+  clig: false,
+  dlig: false,
+} as unknown as PDFKit.Mixins.OpenTypeFeatures[];
+
+/**
+ * Letter-spaced text, one grapheme cluster at a time, where the layout measured it. A cluster's
+ * advance is the width of it and the next one minus the next one, so the kerning pair between them
+ * still counts; then `letter` follows each cluster, and `word` each word gap of justified text.
+ * Each piece's decoration runs on to the next one.
+ */
+function drawLetterSpaced(
+  doc: Doc,
+  op: Extract<DrawOp, { op: 'text' }>,
+  letter: number,
+  word: number,
+): void {
+  const starts = graphemeStarts(op.text);
+  const pieces: { text: string; x: number }[] = [];
+  let x = op.x;
+  let inGap = false;
+  for (const [k, start] of starts.entries()) {
+    const end = starts[k + 1] ?? op.text.length;
+    const cluster = op.text.slice(start, end);
+    const gap = cluster === ' ' || cluster === '\u00a0';
+    if (inGap && !gap) x += word;
+    inGap = gap;
+    pieces.push({ text: cluster, x });
+    const next = op.text.slice(end, starts[k + 2] ?? op.text.length);
+    const width = (part: string) => doc.widthOfString(part, { features: NO_LIGATURES });
+    x += width(cluster + next) - width(next) + letter;
+  }
+  // A gap at the end still counts, as the layout put it before the next run.
+  if (inGap) x += word;
+  for (const [i, piece] of pieces.entries()) {
+    if (piece.text.trim() === '' && !op.underline && !op.strike) continue;
+    const width = (pieces[i + 1]?.x ?? x) - piece.x;
+    doc.text(piece.text, piece.x, op.y, { ...singleLine(op, width), features: NO_LIGATURES });
+  }
+}
+
 /** Index of the code point that ends just before `index`, or 0 at the start. */
 function previousCodePoint(text: string, index: number): number {
   if (index === 0) return 0;
@@ -567,7 +619,8 @@ function drawOp(doc: Doc, op: DrawOp, dataUrls: WeakMap<Uint8Array, string>): vo
     case 'text':
       doc.save();
       doc.font(op.font).fontSize(op.size).fillColor(op.color, op.opacity);
-      if (op.wordSpacing) drawWordSpaced(doc, op, op.wordSpacing);
+      if (op.letterSpacing) drawLetterSpaced(doc, op, op.letterSpacing, op.wordSpacing ?? 0);
+      else if (op.wordSpacing) drawWordSpaced(doc, op, op.wordSpacing);
       else doc.text(op.text, op.x, op.y, singleLine(op, doc.widthOfString(op.text)));
       doc.restore();
       return;

@@ -1,6 +1,14 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { graphemeCount } from './graphemes';
 import { ROOT_TEXT_STYLE, type TextStyle } from './style';
-import { layoutRanges, layoutText, measureText, TextMeasureCache, type TextRange } from './text';
+import {
+  layoutRanges,
+  layoutText,
+  measureText,
+  TextMeasureCache,
+  type ParagraphStyle,
+  type TextRange,
+} from './text';
 import { testFont } from '../../testing/test-fonts';
 import { createPdfkitWriter, type FontMetrics, type PdfWriter } from './writer';
 
@@ -554,6 +562,140 @@ describe('layoutRanges', () => {
   it('rejects ranges over 1 MB in total', () => {
     const half = 'a'.repeat(524_289);
     expect(() => lay([range(half), range(half)])).toThrow('ngpdf: text longer than 1 MB');
+  });
+});
+
+describe('letter-spacing and text-transform', () => {
+  let writer: PdfWriter;
+  beforeAll(async () => {
+    writer = await createPdfkitWriter({ compress: false });
+  });
+  const width = (text: string) => writer.widthOf(text, 'Helvetica', 9);
+  const range = (text: string): TextRange => ({ text, style });
+  const lay = (ranges: readonly TextRange[], maxWidth = Infinity) =>
+    layoutRanges(ranges, style, maxWidth, writer);
+
+  it('adds letter-spacing after every character of a run, the last one too', () => {
+    const spaced: TextStyle = { ...style, letterSpacing: 2 };
+    const [line] = layoutText('Total', spaced, Infinity, writer).lines;
+    expect(line?.width).toBeCloseTo(width('Total') + 5 * 2, 6);
+    expect(line?.runs[0]).toMatchObject({ text: 'Total', letterSpacing: 2 });
+  });
+
+  it('counts a letter and its combining mark as one character', () => {
+    // A standard font draws a combining sequence as "?", so this needs a font that has the mark.
+    writer.registerFont('font:0', testFont('noto-sans-regular.ttf'));
+    const spaced: TextStyle = { ...style, letterSpacing: 2 };
+    const text = 'Cafe\u0301';
+    const [line] = layoutText(text, spaced, Infinity, writer, undefined, undefined, {
+      chain: ['font:0'],
+    }).lines;
+    expect(line?.width).toBeCloseTo(writer.widthOf(text, 'font:0', 9) + 4 * 2, 6);
+  });
+
+  it('wraps by the spaced width', () => {
+    const text = 'ab ab ab ab';
+    const fitsPlain = width('ab ab ab') + 0.5;
+    expect(layoutText(text, style, fitsPlain, writer).lines).toHaveLength(2);
+    const spaced = layoutText(text, { ...style, letterSpacing: 3 }, fitsPlain, writer);
+    expect(spaced.lines.length).toBeGreaterThan(2);
+    for (const line of spaced.lines) expect(line.width).toBeLessThanOrEqual(fitsPlain);
+  });
+
+  it('measures letter-spaced text without ligatures, which a cluster at a time cannot draw', () => {
+    // An "fi" ligature 4pt narrower than its letters.
+    const ligatures: FontMetrics = {
+      widthOf: (text, _font, _size, withLigatures) =>
+        10 * text.length - (withLigatures !== false && text.includes('fi') ? 4 : 0),
+      ascent: () => 0,
+      hasGlyph: () => false,
+    };
+    expect(layoutText('fi', style, Infinity, ligatures).width).toBe(16);
+    expect(layoutText('fi', { ...style, letterSpacing: 1 }, Infinity, ligatures).width).toBe(22);
+  });
+
+  it('fits the ellipsis of a clamped line by the spaced width', () => {
+    const spaced: ParagraphStyle = { ...style, letterSpacing: 2, maxLines: 1 };
+    const maxWidth = 80;
+    const [line, ...rest] = layoutRanges(
+      [{ text: 'Gabriela Teixeira de Albuquerque', style: spaced }],
+      spaced,
+      maxWidth,
+      writer,
+    ).lines;
+    expect(rest).toHaveLength(0);
+    expect(line?.text.endsWith('…')).toBe(true);
+    const drawn = line?.text ?? '';
+    expect(line?.width).toBeCloseTo(width(drawn) + 2 * graphemeCount(drawn), 6);
+    expect(line?.width).toBeLessThanOrEqual(maxWidth);
+  });
+
+  it('spaces only the range that sets letter-spacing', () => {
+    const [line] = lay([range('ab'), { text: 'cd', style: { ...style, letterSpacing: 1 } }]).lines;
+    expect(line?.runs.map((run) => [run.text, run.letterSpacing])).toEqual([
+      ['ab', 0],
+      ['cd', 1],
+    ]);
+    expect(line?.width).toBeCloseTo(width('ab') + width('cd') + 2, 6);
+  });
+
+  it('upper- and lowercases before measuring, without a locale', () => {
+    const [upper] = layoutText(
+      'Straße',
+      { ...style, textTransform: 'uppercase' },
+      Infinity,
+      writer,
+    ).lines;
+    expect(upper?.text).toBe('STRASSE');
+    expect(upper?.width).toBeCloseTo(width('STRASSE'), 6);
+    const [lower] = layoutText(
+      'ÁGUA Viva',
+      { ...style, textTransform: 'lowercase' },
+      Infinity,
+      writer,
+    ).lines;
+    expect(lower?.text).toBe('água viva');
+  });
+
+  it('capitalizes the first letter of each word across ranges, after leading punctuation', () => {
+    const capitalize: TextStyle = { ...style, textTransform: 'capitalize' };
+    const [line] = lay([
+      { text: 'olá (mundo) 2nd', style: capitalize },
+      { text: ' fe', style: capitalize },
+      { text: 'ira', style: capitalize },
+    ]).lines;
+    expect(line?.text).toBe('Olá (Mundo) 2nd Feira');
+  });
+
+  it('transforms each range by its own text-transform, after collapsing whitespace', () => {
+    const [line] = lay([
+      { text: '  total ', style: { ...style, textTransform: 'uppercase' } },
+      range('  pago'),
+    ]).lines;
+    expect(line?.text).toBe('TOTAL pago');
+  });
+
+  it('keeps blocks that differ only in letter-spacing or text-transform apart in the cache', () => {
+    const cache = new TextMeasureCache();
+    const plain = layoutText('abc', style, Infinity, writer, undefined, cache);
+    const spaced = layoutText(
+      'abc',
+      { ...style, letterSpacing: 1 },
+      Infinity,
+      writer,
+      undefined,
+      cache,
+    );
+    const upper = layoutText(
+      'abc',
+      { ...style, textTransform: 'uppercase' },
+      Infinity,
+      writer,
+      undefined,
+      cache,
+    );
+    expect(spaced.width).toBeCloseTo(plain.width + 3, 6);
+    expect(upper.lines[0]?.text).toBe('ABC');
   });
 });
 

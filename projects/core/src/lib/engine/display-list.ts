@@ -1,5 +1,6 @@
 import { toHex, type Color } from './color';
 import { fontChain, fontFor, shapeText, type FontRegistry } from './fonts';
+import { graphemeCount } from './graphemes';
 import { fitImage } from './images';
 import { pageNumberFormat, type Box } from './layout';
 import type { PageLayout, PlacedBox } from './paginate';
@@ -153,6 +154,7 @@ function drawBox(
           underline: run.decoration === 'underline',
           strike: run.decoration === 'line-through',
           ...(gaps > 0 && { wordSpacing: spacing }),
+          ...(run.letterSpacing !== 0 && { letterSpacing: run.letterSpacing }),
         });
       }
     }
@@ -377,7 +379,11 @@ function drawPageNumber(
     while (to < shaped.text.length && shaped.fontAt[to] === index) to++;
     const text = shaped.text.slice(from, to);
     const font = chain[index] ?? fontFor(style);
-    runs.push({ text, font, width: options.metrics.widthOf(text, font, style.fontSize) });
+    const width = style.letterSpacing
+      ? options.metrics.widthOf(text, font, style.fontSize, false) +
+        style.letterSpacing * graphemeCount(text)
+      : options.metrics.widthOf(text, font, style.fontSize);
+    runs.push({ text, font, width });
     from = to;
   }
   const width = runs.reduce((sum, run) => sum + run.width, 0);
@@ -393,6 +399,7 @@ function drawPageNumber(
       ...ink,
       underline: style.textDecoration === 'underline',
       strike: style.textDecoration === 'line-through',
+      ...(style.letterSpacing !== 0 && { letterSpacing: style.letterSpacing }),
     });
     runX += run.width;
   }
